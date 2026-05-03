@@ -1,0 +1,27 @@
+---
+- name: Configure devices
+  hosts: localhost  # run on local machine, dont ssh into anything
+  gather_facts: no  # do not collect system info
+
+  vars_files:
+    - vars/devices.yml
+
+  tasks:
+    - name: Assign node interfaces
+      ansible.builtin.command: >
+        docker exec clab-simple-ip-lab-{{ item.key }} sh -c "
+        ip link set lo up &&
+        
+        {% if item.value.loopback is defined %} 
+          ip addr add {{ item.value.loopback }}/32 dev lo &&
+        {% endif %}
+
+        {% for interface, ip_addr in item.value.interfaces.items() %}
+          ip link set {{ interface }} up &&
+          ip addr replace {{ ip_addr }} dev {{ interface }} &&
+        {% endfor %}
+
+        true
+        "
+
+      loop: "{{ devices | dict2items }}"  # pipe devices to dict2items for key-value conversion
