@@ -4,7 +4,7 @@
   gather_facts: no  # do not collect system info
 
   vars_files:
-    - vars/devices.yml
+    - ../vars/devices.yml
 
   tasks:
     - name: Assign node interfaces
@@ -13,7 +13,7 @@
         ip link set lo up &&
         
         {% if item.value.loopback is defined %} 
-          ip addr add {{ item.value.loopback }}/32 dev lo &&
+          ip addr replace {{ item.value.loopback }}/32 dev lo &&
         {% endif %}
 
         {% for interface, ip_addr in item.value.interfaces.items() %}
