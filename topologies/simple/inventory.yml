@@ -1,0 +1,8 @@
+# this file defines what hosts exist and their connection method
+
+all:
+  children:     # used to define multiple groups
+    machines:   # group called "machines"
+      hosts:
+        local_machine:
+          ansible_connection: local

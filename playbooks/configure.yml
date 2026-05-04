@@ -1,10 +1,7 @@
 ---
 - name: Configure devices
-  hosts: localhost  # run on local machine, dont ssh into anything
+  hosts: local_machine  # run on local machine, dont ssh into anything
   gather_facts: no  # do not collect system info
-
-  vars_files:
-    - ../vars/devices.yml
 
   tasks:
     - name: Assign node interfaces
