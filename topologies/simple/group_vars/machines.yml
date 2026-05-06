@@ -1,24 +1,40 @@
 devices:
   r1:
-    role: router
+    roles: [router]
     loopback: 1.1.1.1
     interfaces:
       eth1: 10.0.1.1/24
       eth2: 10.0.2.1/30
+    routes:
+      - destination: 10.0.3.0/24
+        via: 10.0.2.2
+        dev: eth2
 
   r2:
-    role: router
+    roles: [router]
     loopback: 2.2.2.2
     interfaces:
       eth1: 10.0.2.2/30
       eth2: 10.0.3.1/24
+    routes:
+      - destination: 10.0.1.0/24
+        via: 10.0.2.1
+        dev: eth1
 
   pc1:
-    role: host
+    roles: [host]
+    routes:
+      - destination: 0.0.0.0/0
+        via: 10.0.1.1
+        dev: eth1
     interfaces:
       eth1: 10.0.1.2/24
 
   pc2:
-    role: host
+    roles: [host]
+    routes:
+      - destination: 0.0.0.0/0
+        via: 10.0.3.1
+        dev: eth1
     interfaces:
       eth1: 10.0.3.2/24

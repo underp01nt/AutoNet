@@ -1,6 +1,6 @@
 ---
 - name: Configure devices
-  hosts: local_machine  # run on local machine, dont ssh into anything
+  hosts: machines   # run play on group "machines"
   gather_facts: no  # do not collect system info
 
   tasks:
@@ -18,5 +18,4 @@
             ip addr replace {{ ip_addr }} dev {{ interface }}
           {% endfor %}
         "
-
       loop: "{{ devices | dict2items }}"  # pipe devices to dict2items for key-value conversion

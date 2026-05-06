@@ -1,0 +1,15 @@
+---
+- name: Configure (default) static routes
+  hosts: local_machine
+  gather_facts: no
+  
+  tasks:       
+    - name: Assign routes
+      ansible.builtin.command: >
+        docker exec clab-simple-ip-lab-{{ device_name }} 
+        ip route replace {{ route.destination }} via {{ route.via }} dev {{ route.dev }}
+      loop: "{{ devices | dict2items | subelements('value.routes') }}"
+      vars:
+        device_name: "{{ item.0.key }}"
+        route:  "{{ item.1 }}"
+    
