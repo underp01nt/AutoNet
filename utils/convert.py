@@ -1,7 +1,7 @@
 # convert raw CSV data into a Containerlab topology
 from typing import Literal
-
-import yaml, csv
+from ruamel.yaml import YAML
+import csv, argparse
 import argparse
 
 EXPECTED_NODES_CSV_FIELDS = ["name", "type"]
@@ -10,6 +10,9 @@ EXPECTED_LINKS_CSV_FIELDS = ["device_a", "interface_a", "device_b", "interface_b
 
 DEFAULT_ROUTER_IMAGE = "frrouting/frr:latest"
 DEFAULT_HOST_IMAGE = "alpine:latest"
+
+yaml = YAML()
+yaml.indent(mapping=2, sequence=4, offset=2)
 
 class NetworkTopology:
     def __init__(self, name: str):
@@ -23,7 +26,7 @@ class NetworkTopology:
                 "name": self.name, 
                 "topology": {"nodes": self.nodes, "links": self.links}
             }
-            yaml.dump(self.data, file, sort_keys=False)
+            yaml.dump(self.data, file)
 
 def validate_fieldnames(fields: set, mode: Literal["nodes", "links"]) -> bool:
     match mode:
