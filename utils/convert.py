@@ -83,20 +83,3 @@ if __name__ == "__main__":
     if args.links: parse_links_csv(args.links, topology)
 
     topology.to_clab_yml()
-
-"""
-    interface_planning.csv
-    name,interface,ip_address
-    pc1,eth1,10.0.1.2/24
-    r1,eth1,10.0.1.1/24
-    r1,eth2,10.0.2.1/30
-    r2,eth1,10.0.2.2/30
-    r2,eth2,10.0.4.2/30
-    r4,eth2,10.0.4.1/30
-    r4,eth1,10.0.6.1/24
-    pc2,eth1,10.0.6.2/24
-    r3,eth1,10.0.5.2/30
-    r4,eth3,10.0.5.1/30
-    r1,eth3,10.0.3.1/30
-    r3,eth2,10.0.3.2/30
-"""
