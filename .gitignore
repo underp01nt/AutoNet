@@ -4,5 +4,3 @@ venv
 .venv/
 env/
 clab-*/
-*.png
-*.svg

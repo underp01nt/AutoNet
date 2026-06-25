@@ -18,4 +18,5 @@
             ip addr replace {{ ip_addr }} dev {{ interface }}
           {% endfor %}
         "
-      loop: "{{ devices | dict2items }}"  # pipe devices to dict2items for key-value conversion
+      # pipe devices to dict2items for key-value conversion
+      loop: "{{ devices | dict2items }}"  
