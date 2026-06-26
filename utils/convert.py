@@ -1,8 +1,8 @@
-# convert raw CSV data into a Containerlab topology
-from typing import Literal
+from pathlib import Path
 from ruamel.yaml import YAML
-import csv, argparse
-import argparse
+from ruamel.yaml.comments import CommentedSeq
+from typing import Literal
+import os, csv, argparse
 
 EXPECTED_NODES_CSV_FIELDS = ["name", "type"]
 EXPECTED_INTERFACE_CSV_FIELDS = ["name", "interface", "ip_address"]
@@ -15,13 +15,17 @@ yaml = YAML()
 yaml.indent(mapping=2, sequence=4, offset=2)
 
 class NetworkTopology:
-    def __init__(self, name: str):
+    def __init__(self, name: str, inputs_dir: str):
         self.name = name if name else "my-network"  # assigns containerlab name
         self.nodes: dict = {}
         self.links: list[dict] = []
 
+        # I/O related attributes
+        self.main_dir = Path(inputs_dir).parent
+        self.output_file = self.main_dir / f"{self.name}.clab.yml"
+
     def to_clab_yml(self): 
-        with open(f"{self.name}.clab.yml", "w") as file:
+        with open(self.output_file, "w") as file:
             self.data = {
                 "name": self.name, 
                 "topology": {"nodes": self.nodes, "links": self.links}
@@ -43,7 +47,11 @@ def parse_links_csv(file_path: str, topology: NetworkTopology):
                 for row in reader:
                     endpt_A = f"{row['device_a']}:{row['interface_a']}"
                     endpt_B = f"{row['device_b']}:{row['interface_b']}"
-                    links.append({"endpoints": [endpt_A, endpt_B]})
+                    
+                    endpoints = CommentedSeq([endpt_A, endpt_B])
+                    endpoints.fa.set_flow_style()
+                    
+                    links.append({"endpoints": endpoints})
                 topology.links = links
             else: 
                 raise ValueError("Input header fields are inconsistent")
@@ -73,13 +81,18 @@ def parse_nodes_csv(file_path: str, topology: NetworkTopology):
 
 if __name__ == "__main__": 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n")       # topology name
-    parser.add_argument("-nodes")   # network nodes 
-    parser.add_argument("-links")   # node connections
+    parser.add_argument("inputs", type=str)   # inputs folder
+    parser.add_argument("--name")             # topology name
     args = parser.parse_args()
 
-    topology = NetworkTopology(args.n)
-    if args.nodes: parse_nodes_csv(args.nodes, topology)
-    if args.links: parse_links_csv(args.links, topology)
+    nodes_file = os.path.join(args.inputs, "nodes.csv")
+    links_file = os.path.join(args.inputs, "links.csv")
+
+    if not args.name:
+        raise ValueError("Please provide a topology name")
+    
+    topology = NetworkTopology(args.name, args.inputs)
+    if os.path.exists(nodes_file): parse_nodes_csv(nodes_file, topology)
+    if os.path.exists(links_file): parse_links_csv(links_file, topology)
 
     topology.to_clab_yml()
