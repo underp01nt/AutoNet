@@ -2,7 +2,7 @@ from pathlib import Path
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedSeq
 from typing import Literal
-import os, csv, argparse
+import argparse, csv, json, os
 
 # minimum fields to qualify for YML builds
 EXPECTED_NODES_CSV_FIELDS = ["name", "type"]
@@ -11,6 +11,9 @@ EXPECTED_LINKS_CSV_FIELDS = ["device_a", "interface_a", "device_b", "interface_b
 
 DEFAULT_ROUTER_IMAGE = "frrouting/frr:latest"
 DEFAULT_HOST_IMAGE = "alpine:latest"
+
+# for parsing protocols field in nodes.csv to daemon names
+PROTOCOLS_TO_DAEMONS = {"bgp": "bgpd", "ospf": "ospfd", "isis": "isisd","rip": "ripd"}
 
 yaml = YAML()
 yaml.indent(mapping=2, sequence=4, offset=2)
@@ -63,7 +66,14 @@ class NetworkTopology:
                             case _: roles = CommentedSeq(["Unknown"])
                         roles.fa.set_flow_style()
 
-                        current_device = group_vars_data["devices"].setdefault(row["name"], {"roles": roles})
+                        current_device = group_vars_data["devices"].setdefault(
+                            row["name"], 
+                            {"roles": roles}
+                        )
+
+                        if row.get("default_gateway"):  # assign default gateway for hosts
+                            current_device["default_gateway"] = row["default_gateway"]
+
                         interfaces = current_device.setdefault("interfaces", {})
                         current_interface = interfaces.setdefault(row["interface"], {})
 
@@ -76,7 +86,6 @@ class NetworkTopology:
                         yaml.dump(group_vars_data, f)
         else:
             print("interfaces.csv not detected")
-
 
     def parse_links_csv(self):
         try:
@@ -99,6 +108,28 @@ class NetworkTopology:
                     raise ValueError("Input header fields are inconsistent")
         except Exception as e: print(e)
     
+    def create_daemons_file(self, device_name, protocols: str):
+        """
+            Creates a daemons file for a device\n
+            Example protocols string: "ospf;bgp", "bgp; ospf", "bgp"
+        """
+        parsed_protocols = [p for p in protocols.split(";") if p.strip()]
+        
+        with open("templates/daemons.json") as f: 
+            daemons = json.load(f)
+            for parsed_protocol in parsed_protocols:
+                daemon = PROTOCOLS_TO_DAEMONS.get(parsed_protocol)
+
+                if daemon: daemons[daemon] = "yes"
+                else: raise ValueError(f"Invalid protocol name: {parsed_protocol}")
+
+        device_dir = self.main_dir / "configs" / device_name
+        device_dir.mkdir(parents=True, exist_ok=True) 
+
+        with open(device_dir / f"daemons", "w") as f:
+            for daemon, enabled in daemons.items():
+                f.write(f"{daemon}={enabled}\n")
+
     def parse_nodes_csv(self):
         try:
             with open(self.nodes_file_path, mode="r", newline="") as nodes_file:
@@ -109,10 +140,24 @@ class NetworkTopology:
                     for row in reader: 
                         kind = "linux"
                         match row["type"]:
-                            case "router": self.nodes[row["name"]] = {
-                                    "kind": kind, 
-                                    "image": DEFAULT_ROUTER_IMAGE,
-                                }
+                            case "router": 
+                                if not row["protocols"]:
+                                    self.nodes[row["name"]] = {
+                                        "kind": kind, 
+                                        "image": DEFAULT_ROUTER_IMAGE
+                                    }
+                                else:
+                                    # create daemon file for this (router) node
+                                    self.create_daemons_file(row["name"], row["protocols"])
+                                    self.nodes[row["name"]] = {
+                                        "kind": kind, 
+                                        "image": DEFAULT_ROUTER_IMAGE,
+                                        "binds": [
+                                            f"configs/{row["name"]}/daemons:/etc/frr/daemons"
+                                        ],
+                                        "exec": ["touch /etc/frr/vtysh.conf"]
+                                    }
+
                             case "host": self.nodes[row["name"]] = {
                                     "kind": kind, 
                                     "image": DEFAULT_HOST_IMAGE,
