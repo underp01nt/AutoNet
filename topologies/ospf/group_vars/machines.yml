@@ -1,0 +1,73 @@
+devices:
+  r1:
+    roles: [router]
+    interfaces:
+      eth1:
+        ip_address: 10.0.1.1/24
+        ospf_area: 0
+      eth2:
+        ip_address: 10.0.0.1/30
+        ospf_area: 0
+      eth3:
+        ip_address: 10.0.0.5/30
+        ospf_area: 0
+      lo:
+        ip_address: 1.1.1.1/32
+        ospf_area: 0
+  r2:
+    roles: [router]
+    interfaces:
+      eth1:
+        ip_address: 10.0.0.2/30
+        ospf_area: 0
+      eth2:
+        ip_address: 10.0.2.1/30
+        ospf_area: 2
+      eth3:
+        ip_address: 10.0.2.5/30
+        ospf_area: 2
+      lo:
+        ip_address: 2.2.2.2/32
+        ospf_area: 0
+  r3:
+    roles: [router]
+    interfaces:
+      eth1:
+        ip_address: 10.0.0.6/30
+        ospf_area: 0
+      eth2:
+        ip_address: 10.0.2.2/30
+        ospf_area: 2
+      eth3:
+        ip_address: 10.0.2.9/30
+        ospf_area: 2
+      lo:
+        ip_address: 3.3.3.3/32
+        ospf_area: 0
+  r4:
+    roles: [router]
+    interfaces:
+      eth1:
+        ip_address: 10.0.2.6/30
+        ospf_area: 2
+      eth2:
+        ip_address: 10.0.2.10/30
+        ospf_area: 2
+      eth3:
+        ip_address: 10.0.3.1/24
+        ospf_area: 2
+      lo:
+        ip_address: 4.4.4.4/32
+        ospf_area: 2
+  pc1:
+    roles: [host]
+    default_gateway: 10.0.1.1
+    interfaces:
+      eth1:
+        ip_address: 10.0.1.2/24
+  pc2:
+    roles: [host]
+    default_gateway: 10.0.3.1
+    interfaces:
+      eth1:
+        ip_address: 10.0.3.2/24

@@ -1,0 +1,44 @@
+---
+- name: Configure devices
+  hosts: machines
+  gather_facts: no
+
+  tasks: 
+    - name: Assign interfaces
+      ansible.builtin.shell: |
+        {% if interfaces %}
+          docker exec clab-ospf-lab-{{ device }} sh -ec "
+            # configure all interfaces
+            {% for name, config in interfaces.items() %}
+              ip link set {{ name }} up 
+              ip addr replace {{ config.ip_address }} dev {{ name }}
+            {% endfor %}
+
+            {% if 'router' in node_roles %}
+              vtysh <<EOF
+                configure terminal
+                router ospf
+
+                {% for name, config in interfaces.items() %}
+                    interface {{ name }}
+
+                    {% if config.ospf_area is defined %}
+                        ip ospf area {{ config.ospf_area }}
+                    {% endif %}
+
+                    exit
+                {% endfor %}
+                end
+              EOF
+
+            # configure host default gateway 
+            {% else %}  
+              ip route replace default via {{ item.value.default_gateway }}
+            {% endif %}
+          "
+        {% endif %}
+      loop: "{{ devices | dict2items }}"
+      vars:
+        device: "{{ item.key }}"
+        interfaces: "{{ item.value.interfaces | default({}) }}"
+        node_roles: "{{ item.value.roles }}"

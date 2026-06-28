@@ -1,7 +1,7 @@
-name,type
-pc1,host
+name,type,protocols
+pc1,host,
 pc2,host
-r1,router
-r2,router
-r3,router
-r4,router
+r1,router,ospf
+r2,router,ospf
+r3,router,ospf
+r4,router,ospf

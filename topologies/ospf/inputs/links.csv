@@ -1,7 +1,8 @@
 device_a,interface_a,device_b,interface_b
 pc1,eth1,r1,eth1
 r1,eth2,r2,eth1
-r2,eth2,r4,eth2
-r4,eth1,pc2,eth1
-r4,eth3,r3,eth1
-r3,eth2,r1,eth3
+r1,eth3,r3,eth1
+r2,eth2,r3,eth2
+r2,eth3,r4,eth1
+r3,eth3,r4,eth2
+r4,eth3,pc2,eth1
