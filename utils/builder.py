@@ -111,7 +111,7 @@ class NetworkTopology:
     def create_daemons_file(self, device_name, protocols: str):
         """
             Creates a daemons file for a device\n
-            Example protocols string: "ospf;bgp", "bgp; ospf", "bgp"
+            :protocols: string of routing protocol/s (example: "ospf;bgp", "bgp; ospf", "bgp")
         """
         parsed_protocols = [p for p in protocols.split(";") if p.strip()]
         
