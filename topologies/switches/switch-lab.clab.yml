@@ -1,0 +1,22 @@
+name: switch-lab
+topology:
+  nodes:
+    pc1:
+      kind: linux
+      image: alpine:latest
+    pc2:
+      kind: linux
+      image: alpine:latest
+    sw1:
+      kind: nokia_srlinux
+      image: ghcr.io/nokia/srlinux
+      startup-config: configs/sw-lag.cli
+    sw2:
+      kind: nokia_srlinux
+      image: ghcr.io/nokia/srlinux
+      startup-config: configs/sw-lag.cli
+  links:
+    - endpoints: [pc1:eth1, sw1:e1-1]
+    - endpoints: [sw1:e1-2, sw2:e1-2]
+    - endpoints: [sw1:e1-3, sw2:e1-3]
+    - endpoints: [sw2:e1-1, pc2:eth1]

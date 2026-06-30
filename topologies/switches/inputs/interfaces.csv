@@ -1,0 +1,3 @@
+name,interface,ip_address,roles,ospf_area,default_gateway
+pc1,eth1,192.168.1.10/24,host,,192.168.1.1
+pc2,eth1,192.168.1.20/24,host,,192.168.1.1

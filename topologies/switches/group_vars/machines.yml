@@ -1,0 +1,13 @@
+devices:
+  pc1:
+    roles: [host]
+    default_gateway: 192.168.1.1
+    interfaces:
+      eth1:
+        ip_address: 192.168.1.10/24
+  pc2:
+    roles: [host]
+    default_gateway: 192.168.1.1
+    interfaces:
+      eth1:
+        ip_address: 192.168.1.20/24

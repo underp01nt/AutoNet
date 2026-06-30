@@ -1,3 +1,13 @@
+"""
+    Builds Containerlab topology-related files.
+    
+    Options:
+
+        inputs: inputs folder containing [nodes.csv, links.csv, interfaces.csv]
+        --name: topology name
+        --group: Ansible group name for group_vars
+"""
+
 from pathlib import Path
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedSeq
@@ -11,6 +21,7 @@ EXPECTED_LINKS_CSV_FIELDS = ["device_a", "interface_a", "device_b", "interface_b
 
 DEFAULT_ROUTER_IMAGE = "frrouting/frr:latest"
 DEFAULT_HOST_IMAGE = "alpine:latest"
+DEFAULT_SWITCH_IMAGE = "ghcr.io/nokia/srlinux"   # sr_linux
 
 # for parsing protocols field in nodes.csv to daemon names
 PROTOCOLS_TO_DAEMONS = {"bgp": "bgpd", "ospf": "ospfd", "isis": "isisd","rip": "ripd"}
@@ -161,6 +172,13 @@ class NetworkTopology:
                             case "host": self.nodes[row["name"]] = {
                                     "kind": kind, 
                                     "image": DEFAULT_HOST_IMAGE,
+                                }
+
+                            case "switch":
+                                self.nodes[row["name"]] = {
+                                    "kind": "nokia_srlinux",
+                                    "image": DEFAULT_SWITCH_IMAGE,
+                                    "type": "ixr-d3"
                                 }
                 else:
                     raise ValueError("Input header fields are inconsistent")  

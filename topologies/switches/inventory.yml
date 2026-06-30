@@ -1,0 +1,7 @@
+all:
+  children:
+    machines:
+      hosts:
+        local_machine:
+          ansible_connection: local
+          ansible_python_interpreter: /home/clab/.venv/bin/python3.11

@@ -1,0 +1,23 @@
+---
+- name: Configure nodes
+  hosts: machines
+  gather_facts: no
+
+  tasks:
+    - name: Assign interfaces
+      ansible.builtin.shell: |
+        {% if interfaces %}
+          {% if 'host' in node_roles %}
+            docker exec clab-switch-lab-{{ device }} sh -ec "
+              {% for name, config in interfaces.items() %}
+                ip link set {{ name }} up 
+                ip addr replace {{ config.ip_address }} dev {{ name }}
+              {% endfor %}
+            "
+          {% endif %}
+        {% endif %}
+      loop: "{{ devices | dict2items }}"
+      vars:
+        device: "{{ item.key }}"
+        interfaces: "{{ item.value.interfaces | default({}) }}"
+        node_roles: "{{ item.value.roles }}"
