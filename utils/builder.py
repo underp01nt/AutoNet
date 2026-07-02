@@ -36,10 +36,18 @@ def _validate_fieldnames(fields: set, mode: Literal["nodes", "links", "interface
         case "interfaces": return set(EXPECTED_INTERFACES_CSV_FIELDS).issubset(fields)
 
 class NetworkTopology:
+    r"""
+    Stores node-related data for generating configs and .clab.yml artifacts
+    """
     def __init__(self, name: str, group: str, inputs_dir: str):
         self.name = name if name else "my-network"  # assigns containerlab name
         self.nodes: dict = {}
         self.links: list[dict] = []
+
+        # defines node-type mapping (e.g. r1: router)
+        self.node_type: dict[str, str] = {}
+        # maps switch name to its interfaces
+        self.switch_interfaces: dict[str, set] = {}
 
         # I/O related attributes
         self.main_dir = Path(inputs_dir).parent
@@ -54,6 +62,10 @@ class NetworkTopology:
 
         if os.path.exists(nodes_file_path): self.parse_nodes_csv()
         if os.path.exists(links_file_path): self.parse_links_csv()
+
+        if self.switch_interfaces:
+            for switch in self.switch_interfaces:
+                self.create_switch_cli_file(switch)
 
     def to_clab_yml(self): 
         with open(self.output_clab_file, "w") as file:
@@ -98,6 +110,32 @@ class NetworkTopology:
         else:
             print("interfaces.csv not detected")
 
+    def create_switch_cli_file(self, name: str) -> str:
+        r"""
+            Creates a .cli file for a switch, returns path of the .cli file
+        """
+
+        switch_dir = self.main_dir / "configs" / name
+        switch_dir.mkdir(parents=True, exist_ok=True)
+
+        # configuration for treating an sr-linux device as a switch
+        with open(switch_dir / f"{name}.cli", "w") as switch_config:
+            switch_config.write("enter candidate \n")
+            switch_config.write("set network-instance mac-vrf-1 type mac-vrf \n")
+            switch_config.write("set network-instance mac-vrf-1 admin-state enable \n\n")
+            
+            for interface in self.switch_interfaces[name]:
+                # create interface
+                switch_config.write(f"set interface {interface} admin-state enable \n")
+                # define interface type
+                switch_config.write(f"set interface {interface} subinterface 0 type bridged \n\n")
+                # assign interface to switch instance
+                switch_config.write(f"set network-instance mac-vrf-1 interface {interface}.0 \n")
+
+            switch_config.write("commit now")
+
+        return f"configs/{name}/{name}.cli"
+
     def parse_links_csv(self):
         try:
             with open(self.links_file_path, mode="r", newline="") as links_file:
@@ -114,6 +152,15 @@ class NetworkTopology:
                         endpoints.fa.set_flow_style()
                         
                         links.append({"endpoints": endpoints})
+
+                        for device, interface in [
+                            (row["device_a"], row["interface_a"]), 
+                            (row["device_b"], row["interface_b"])
+                        ]:
+                            if self.node_type[device] == "switch":   
+                                # {'sw1': {'e1-2', 'e1-1',... }}
+                                self.switch_interfaces.setdefault(device, set()).add(interface)
+
                     self.links = links
                 else: 
                     raise ValueError("Input header fields are inconsistent")
@@ -168,18 +215,19 @@ class NetworkTopology:
                                         ],
                                         "exec": ["touch /etc/frr/vtysh.conf"]
                                     }
+                                self.node_type[row["name"]] = "router"
 
                             case "host": self.nodes[row["name"]] = {
                                     "kind": kind, 
                                     "image": DEFAULT_HOST_IMAGE,
-                                }
+                                }; self.node_type[row["name"]] = "host"
 
                             case "switch":
                                 self.nodes[row["name"]] = {
                                     "kind": "nokia_srlinux",
                                     "image": DEFAULT_SWITCH_IMAGE,
-                                    "type": "ixr-d3"
-                                }
+                                    "startup-config": f"configs/{row["name"]}/{row["name"]}.cli"
+                                }; self.node_type[row["name"]] = "switch"
                 else:
                     raise ValueError("Input header fields are inconsistent")  
         except Exception as e: print(e)
