@@ -1,11 +1,22 @@
-"""
-    Builds Containerlab topology-related files.
+r"""
+    Builds Containerlab topology and configuration files for network deployments.
     
     Options:
+        **[REQUIRED]**
+            inputs: "inputs" folder containing [nodes.csv, links.csv, interfaces.csv]
+            
+        **[OPTIONAL]**
+            --name: topology name
+            --group: Ansible group name for group_vars
+            --switch: Docker container kind for switch OS  (currently supporting nokia_srlinux and arista_ceos)
 
-        inputs: inputs folder containing [nodes.csv, links.csv, interfaces.csv]
-        --name: topology name
-        --group: Ansible group name for group_vars
+    Program output:
+        - *.clab.yml: Containerlab deployment file
+        - configs/*: directory containing configuration files for one or more network node
+        - group_vars/{--group}: Ansible group_vars file
+
+    Example program call:
+        `python builder.py --name "example-lab" <inputs_directory_path> --group "nodes" --switch "arista_ceos"`
 """
 
 from pathlib import Path
@@ -21,7 +32,10 @@ EXPECTED_LINKS_CSV_FIELDS = ["device_a", "interface_a", "device_b", "interface_b
 
 DEFAULT_ROUTER_IMAGE = "frrouting/frr:latest"
 DEFAULT_HOST_IMAGE = "alpine:latest"
-DEFAULT_SWITCH_IMAGE = "ghcr.io/nokia/srlinux"   # sr_linux
+
+# switch images
+DEFAULT_SRLINUX_IMAGE = "ghcr.io/nokia/srlinux" 
+DEFAULT_CEOS_IMAGE = "ceos:4.36.1F"
 
 # for parsing protocols field in nodes.csv to daemon names
 PROTOCOLS_TO_DAEMONS = {"bgp": "bgpd", "ospf": "ospfd", "isis": "isisd","rip": "ripd"}
@@ -39,7 +53,7 @@ class NetworkTopology:
     r"""
     Stores node-related data for generating configs and .clab.yml artifacts
     """
-    def __init__(self, name: str, group: str, inputs_dir: str):
+    def __init__(self, name: str, group: str, inputs_dir: str, switch_kind="arista_ceos"):
         self.name = name if name else "my-network"  # assigns containerlab name
         self.nodes: dict = {}
         self.links: list[dict] = []
@@ -49,12 +63,15 @@ class NetworkTopology:
         # maps switch name to its interfaces
         self.switch_interfaces: dict[str, set] = {}
 
+        # option to use SR Linux or cEOS
+        self.switch_kind = switch_kind
+
         # I/O related attributes
         self.main_dir = Path(inputs_dir).parent
-        self.output_clab_file = self.main_dir / f"{name}.clab.yml"
+        self.output_clab_file = self.main_dir / f"{name or "topology"}.clab.yml"
 
         (self.main_dir / f"group_vars").mkdir(parents=True, exist_ok=True)
-        self.output_group_vars_file = self.main_dir / f"group_vars" / f"{group}.yml"
+        self.output_group_vars_file = self.main_dir / f"group_vars" / f"{group or "group"}.yml"
         
         self.nodes_file_path: Path = Path(inputs_dir) / f"nodes.csv" 
         self.links_file_path: Path  = Path(inputs_dir) / f"links.csv" 
@@ -65,7 +82,19 @@ class NetworkTopology:
 
         if self.switch_interfaces:
             for switch in self.switch_interfaces:
-                self.create_switch_cli_file(switch)
+                match self.switch_kind:
+                    case "arista_ceos": self.create_ceos_switch_cli_file(switch)
+                    case "nokia_srlinux": self.create_srlinux_switch_cli_file(switch)
+                    case _: raise ValueError("Unrecognized switch image")
+
+    def _get_switch_image(self) -> str:
+        r"""
+        Returns switch image given the selected switch kind 
+        """
+        match self.switch_kind:
+            case "arista_ceos": return DEFAULT_CEOS_IMAGE
+            case "sr_linux": return DEFAULT_SRLINUX_IMAGE
+            case _: raise ValueError("unknown switch kind")
 
     def to_clab_yml(self): 
         with open(self.output_clab_file, "w") as file:
@@ -110,7 +139,22 @@ class NetworkTopology:
         else:
             print("interfaces.csv not detected")
 
-    def create_switch_cli_file(self, name: str) -> str:
+    def create_ceos_switch_cli_file(self, name: str) -> str:
+        switch_dir = self.main_dir / "configs" / name
+        switch_dir.mkdir(parents=True, exist_ok=True)
+
+        with open(switch_dir / f"{name}.cli", "w") as ceos_switch_config:
+            ceos_switch_config.write(f"hostname {name}\n")
+
+            for interface in self.switch_interfaces[name]:
+                ceos_switch_config.write(f"interface {interface}\n")
+                ceos_switch_config.write("  no shut\n")
+                ceos_switch_config.write("  switchport\n")
+                ceos_switch_config.write("!\n")
+
+        return f"configs/{name}/{name}.cli"
+
+    def create_srlinux_switch_cli_file(self, name: str) -> str:
         r"""
             Creates a .cli file for a switch, returns path of the .cli file
         """
@@ -119,20 +163,21 @@ class NetworkTopology:
         switch_dir.mkdir(parents=True, exist_ok=True)
 
         # configuration for treating an sr-linux device as a switch
-        with open(switch_dir / f"{name}.cli", "w") as switch_config:
-            switch_config.write("enter candidate \n")
-            switch_config.write("set network-instance mac-vrf-1 type mac-vrf \n")
-            switch_config.write("set network-instance mac-vrf-1 admin-state enable \n\n")
+        with open(switch_dir / f"{name}.cli", "w") as srlinux_switch_config:
+            srlinux_switch_config.write("enter candidate \n")
+            srlinux_switch_config.write(f"edit system name host-name {name}")
+            srlinux_switch_config.write("set network-instance mac-vrf-1 type mac-vrf \n")
+            srlinux_switch_config.write("set network-instance mac-vrf-1 admin-state enable \n\n")
             
             for interface in self.switch_interfaces[name]:
                 # create interface
-                switch_config.write(f"set interface {interface} admin-state enable \n")
+                srlinux_switch_config.write(f"set interface {interface} admin-state enable \n")
                 # define interface type
-                switch_config.write(f"set interface {interface} subinterface 0 type bridged \n\n")
+                srlinux_switch_config.write(f"set interface {interface} subinterface 0 type bridged \n\n")
                 # assign interface to switch instance
-                switch_config.write(f"set network-instance mac-vrf-1 interface {interface}.0 \n")
+                srlinux_switch_config.write(f"set network-instance mac-vrf-1 interface {interface}.0 \n")
 
-            switch_config.write("commit now")
+            srlinux_switch_config.write("commit now")
 
         return f"configs/{name}/{name}.cli"
 
@@ -167,7 +212,7 @@ class NetworkTopology:
         except Exception as e: print(e)
     
     def create_daemons_file(self, device_name, protocols: str):
-        """
+        r"""
             Creates a daemons file for a device\n
             :protocols: string of routing protocol/s (example: "ospf;bgp", "bgp; ospf", "bgp")
         """
@@ -224,8 +269,8 @@ class NetworkTopology:
 
                             case "switch":
                                 self.nodes[row["name"]] = {
-                                    "kind": "nokia_srlinux",
-                                    "image": DEFAULT_SWITCH_IMAGE,
+                                    "kind": self.switch_kind,
+                                    "image": self._get_switch_image(),
                                     "startup-config": f"configs/{row["name"]}/{row["name"]}.cli"
                                 }; self.node_type[row["name"]] = "switch"
                 else:
@@ -234,19 +279,17 @@ class NetworkTopology:
 
 if __name__ == "__main__": 
     parser = argparse.ArgumentParser()
-    parser.add_argument("inputs", type=str)   # inputs folder
-    parser.add_argument("--name")             # topology name
-    parser.add_argument("--group")            # group name for Ansible
+    parser.add_argument("inputs", type=str)     # inputs folder
+    parser.add_argument("--name")               # topology name
+    parser.add_argument("--group")              # group name for Ansible
+    parser.add_argument("--switch", type=str)   # switch option
     args = parser.parse_args()
 
     nodes_file_path = os.path.join(args.inputs, "nodes.csv")
     links_file_path = os.path.join(args.inputs, "links.csv")
     interfaces_file_path = os.path.join(args.inputs, "interfaces.csv")
 
-    if not args.name:
-        raise ValueError("Please provide a topology name")
-    
-    topology = NetworkTopology(args.name, args.group, args.inputs)
+    topology = NetworkTopology(args.name, args.group, args.inputs, switch_kind=args.switch)
     topology.to_group_vars_file()
     
     if not topology.links: print("links.csv not detected")
