@@ -155,6 +155,7 @@ class NetworkTopology:
 
         with open(switch_dir / f"{name}.cli", "w") as ceos_switch_config:
             ceos_switch_config.write(f"hostname {name}\n")
+            ceos_switch_config.write(f"conf t\n\n")
 
             for interface in self.switch_interfaces[name]:
                 ceos_switch_config.write(f"interface {interface}\n")
