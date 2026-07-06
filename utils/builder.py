@@ -3,12 +3,12 @@ r"""
     
     Options:
         **[REQUIRED]**
-            inputs: "inputs" folder containing [nodes.csv, links.csv, interfaces.csv]
+            `inputs`: "inputs" folder containing [nodes.csv, links.csv, interfaces.csv]
             
         **[OPTIONAL]**
-            --name: topology name
-            --group: Ansible group name for group_vars
-            --switch: Docker container kind for switch OS  (currently supporting nokia_srlinux and arista_ceos)
+            `--name`: topology name
+            `--group`: Ansible group name for group_vars
+            `--switch`: Docker container kind for switch OS  (currently supporting nokia_srlinux and arista_ceos)
 
     Program output:
         - *.clab.yml: Containerlab deployment file
@@ -16,7 +16,12 @@ r"""
         - group_vars/{--group}: Ansible group_vars file
 
     Example program call:
-        `python builder.py --name "example-lab" <inputs_directory_path> --group "nodes" --switch "arista_ceos"`
+    ```
+    python builder.py --name "example-lab" <inputs_directory_path> --group "nodes" --switch "arista_ceos"
+    ```
+
+    NOTES:
+        1. All program output files and directories are placed in the parent of the `inputs` folder
 """
 
 from pathlib import Path
@@ -30,7 +35,10 @@ EXPECTED_NODES_CSV_FIELDS = ["name", "type"]
 EXPECTED_INTERFACES_CSV_FIELDS = ["name", "interface", "ip_address", "roles"]
 EXPECTED_LINKS_CSV_FIELDS = ["device_a", "interface_a", "device_b", "interface_b"]
 
+# router images
 DEFAULT_ROUTER_IMAGE = "frrouting/frr:latest"
+
+# host images
 DEFAULT_HOST_IMAGE = "alpine:latest"
 
 # switch images
@@ -55,12 +63,14 @@ class NetworkTopology:
     """
     def __init__(self, name: str, group: str, inputs_dir: str, switch_kind="arista_ceos"):
         self.name = name if name else "my-network"  # assigns containerlab name
+
+        # defines nodes and links data for .clab.yml
         self.nodes: dict = {}
         self.links: list[dict] = []
 
         # defines node-type mapping (e.g. r1: router)
         self.node_type: dict[str, str] = {}
-        # maps switch name to its interfaces
+        # maps switch name to its interfaces in-use
         self.switch_interfaces: dict[str, set] = {}
 
         # option to use SR Linux or cEOS
@@ -94,7 +104,7 @@ class NetworkTopology:
         match self.switch_kind:
             case "arista_ceos": return DEFAULT_CEOS_IMAGE
             case "sr_linux": return DEFAULT_SRLINUX_IMAGE
-            case _: raise ValueError("unknown switch kind")
+            case _: raise ValueError("Unknown switch kind")
 
     def to_clab_yml(self): 
         with open(self.output_clab_file, "w") as file:
@@ -289,11 +299,16 @@ if __name__ == "__main__":
     links_file_path = os.path.join(args.inputs, "links.csv")
     interfaces_file_path = os.path.join(args.inputs, "interfaces.csv")
 
-    topology = NetworkTopology(args.name, args.group, args.inputs, switch_kind=args.switch)
-    topology.to_group_vars_file()
+    no_nodes = not os.path.exists(nodes_file_path)
+    no_links = not os.path.exists(links_file_path)
+    no_interfaces = not os.path.exists(interfaces_file_path)
+
+    if no_nodes: print("nodes.csv not detected")
+    if no_links: print("links.csv not detected")
+    if no_interfaces: print("interfaces.csv not detected")
     
-    if not topology.links: print("links.csv not detected")
-    elif not topology.nodes: print("nodes.csv not detected")
-    else:
+    if not (no_nodes or no_links or no_interfaces):
+        topology = NetworkTopology(args.name, args.group, args.inputs, switch_kind=args.switch)
+        topology.to_group_vars_file()
         topology.to_clab_yml()
         print("*** Successfully defined topology ***\n")
