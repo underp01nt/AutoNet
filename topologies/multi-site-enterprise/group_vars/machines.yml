@@ -1,0 +1,68 @@
+devices:
+  pc1:
+    roles: [host]
+    default_gateway: 10.100.10.1
+    interfaces:
+      eth1:
+        ip_address: 10.100.10.10/24
+        ospf_passive: false
+  coreA:
+    roles: [router]
+    interfaces:
+      eth2:
+        ip_address: 10.100.10.1/24
+        ospf_area: 0
+        ospf_passive: true
+      eth3:
+        ip_address: 10.100.1.9/30
+        ospf_area: 0
+        ospf_passive: false
+      eth1:
+        ip_address: 10.100.1.2/30
+        ospf_area: 0
+        ospf_passive: false
+      lo:
+        ip_address: 10.100.255.2/32
+        ospf_area: 0
+        ospf_passive: false
+  access:
+    roles: [router]
+    interfaces:
+      eth2:
+        ip_address: 10.100.1.1/30
+        ospf_area: 0
+        ospf_passive: false
+      lo:
+        ip_address: 10.100.255.1/32
+        ospf_area: 0
+        ospf_passive: false
+      eth3:
+        ip_address: 10.100.1.5/30
+        ospf_area: 0
+        ospf_passive: false
+  pc2:
+    roles: [host]
+    default_gateway: 10.100.20.1
+    interfaces:
+      eth1:
+        ip_address: 10.100.20.10/24
+        ospf_passive: false
+  coreB:
+    roles: [router]
+    interfaces:
+      eth2:
+        ip_address: 10.100.20.1/24
+        ospf_area: 0
+        ospf_passive: true
+      eth3:
+        ip_address: 10.100.1.10/30
+        ospf_area: 0
+        ospf_passive: false
+      eth1:
+        ip_address: 10.100.1.6/30
+        ospf_area: 0
+        ospf_passive: false
+      lo:
+        ip_address: 10.100.255.3/32
+        ospf_area: 0
+        ospf_passive: false

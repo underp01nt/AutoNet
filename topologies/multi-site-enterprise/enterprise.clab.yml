@@ -1,0 +1,46 @@
+name: enterprise
+topology:
+  nodes:
+    pc1:
+      kind: linux
+      image: alpine:latest
+    pc2:
+      kind: linux
+      image: alpine:latest
+    swA:
+      kind: arista_ceos
+      image: ceos:4.36.1F
+      startup-config: configs/swA/swA.cli
+    swB:
+      kind: arista_ceos
+      image: ceos:4.36.1F
+      startup-config: configs/swB/swB.cli
+    coreA:
+      kind: linux
+      image: frrouting/frr:latest
+      binds:
+        - configs/coreA/daemons:/etc/frr/daemons
+      exec:
+        - touch /etc/frr/vtysh.conf
+    coreB:
+      kind: linux
+      image: frrouting/frr:latest
+      binds:
+        - configs/coreB/daemons:/etc/frr/daemons
+      exec:
+        - touch /etc/frr/vtysh.conf
+    access:
+      kind: linux
+      image: frrouting/frr:latest
+      binds:
+        - configs/access/daemons:/etc/frr/daemons
+      exec:
+        - touch /etc/frr/vtysh.conf
+  links:
+    - endpoints: [pc1:eth1, swA:eth2]
+    - endpoints: [pc2:eth1, swB:eth2]
+    - endpoints: [swA:eth1, coreA:eth2]
+    - endpoints: [swB:eth1, coreB:eth2]
+    - endpoints: [coreA:eth3, coreB:eth3]
+    - endpoints: [access:eth2, coreA:eth1]
+    - endpoints: [access:eth3, coreB:eth1]

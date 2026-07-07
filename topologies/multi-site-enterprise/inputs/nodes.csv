@@ -1,0 +1,8 @@
+name,type,protocols
+pc1,host,
+pc2,host,
+swA,switch,
+swB,switch,
+coreA,router,ospf
+coreB,router,ospf
+access,router,ospf

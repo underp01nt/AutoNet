@@ -1,0 +1,14 @@
+name,interface,ip_address,roles,ospf_area,default_gateway,ospf_passive
+pc1,eth1,10.100.10.10/24,host,,10.100.10.1,false
+coreA,eth2,10.100.10.1/24,router,0,,true
+coreA,eth3,10.100.1.9/30,router,0,,false
+coreA,eth1,10.100.1.2/30,router,0,,false
+coreA,lo,10.100.255.2/32,router,0,,false
+access,eth2,10.100.1.1/30,router,0,,false
+pc2,eth1,10.100.20.10/24,host,,10.100.20.1,false
+coreB,eth2,10.100.20.1/24,router,0,,true
+coreB,eth3,10.100.1.10/30,router,0,,false
+coreB,eth1,10.100.1.6/30,router,0,,false
+coreB,lo,10.100.255.3/32,router,0,,false
+access,lo,10.100.255.1/32,router,0,,false
+access,eth3,10.100.1.5/30,router,0,,false

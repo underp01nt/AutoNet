@@ -1,0 +1,8 @@
+device_a,interface_a,device_b,interface_b
+pc1,eth1,swA,eth2
+pc2,eth1,swB,eth2
+swA,eth1,coreA,eth2
+swB,eth1,coreB,eth2
+coreA,eth3,coreB,eth3
+access,eth2,coreA,eth1
+access,eth3,coreB,eth1
