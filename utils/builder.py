@@ -22,8 +22,13 @@ r"""
 
     NOTES:
         1. All program output files and directories are placed in the parent of the `inputs` folder
+        2. Switch interface convention::
+
+            - arista_ceos: eth<port>
+            - nokia_srlinux: ethernet-<slot>/<port>
 """
 
+from ipaddress import IPv4Interface
 from pathlib import Path
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedSeq
@@ -61,8 +66,9 @@ class NetworkTopology:
     r"""
     Stores node-related data for generating configs and .clab.yml artifacts
     """
-    def __init__(self, name: str, group: str, inputs_dir: str, switch_kind="arista_ceos"):
+    def __init__(self, name: str, group: str, inputs_dir: str, switch_kind="arista_ceos", **filepaths):
         self.name = name if name else "my-network"  # assigns containerlab name
+        self.devices: dict = {}   # stores group_vars file data
 
         # defines nodes and links data for .clab.yml
         self.nodes: dict = {}
@@ -72,7 +78,6 @@ class NetworkTopology:
         self.node_type: dict[str, str] = {}
         # maps switch name to its interfaces in-use
         self.switch_interfaces: dict[str, set] = {}
-
         # option to use SR Linux or cEOS
         self.switch_kind = switch_kind
 
@@ -83,12 +88,21 @@ class NetworkTopology:
         (self.main_dir / f"group_vars").mkdir(parents=True, exist_ok=True)
         self.output_group_vars_file = self.main_dir / f"group_vars" / f"{group or "group"}.yml"
         
-        self.nodes_file_path: Path = Path(inputs_dir) / f"nodes.csv" 
-        self.links_file_path: Path  = Path(inputs_dir) / f"links.csv" 
-        self.interfaces_file_path: Path = Path(inputs_dir) / f"interfaces.csv" 
+        self.nodes_file_path: Path = filepaths["nodes_file_path"]              # REQUIRED FILE
+        self.links_file_path: Path  = filepaths["links_file_path"]             # REQUIRED FILE
+        self.interfaces_file_path: Path = filepaths["interfaces_file_path"]    # REQUIRED FILE
+        self.subnets_file_path = filepaths.get("subnets_file_path", None)      # OPTIONAL FILE
 
-        if os.path.exists(nodes_file_path): self.parse_nodes_csv()
-        if os.path.exists(links_file_path): self.parse_links_csv()
+        # parse each input csv file
+        self.parse_nodes_csv()
+        self.parse_links_csv()
+        self.parse_interfaces_csv()
+        
+        if self.subnets_file_path: 
+            self.parse_subnets_csv()
+
+        # validate the newly created topology to detect any network inconsistencies
+        # self.validate_topology()
 
         if self.switch_interfaces:
             for switch in self.switch_interfaces:
@@ -106,50 +120,23 @@ class NetworkTopology:
             case "sr_linux": return DEFAULT_SRLINUX_IMAGE
             case _: raise ValueError("Unknown switch kind")
 
+    def write_all(self):
+        self.to_clab_yml()
+        self.to_group_vars_file()
+
     def to_clab_yml(self): 
         with open(self.output_clab_file, "w") as file:
             data = {"name": self.name, "topology": {"nodes": self.nodes, "links": self.links}}
             yaml.dump(data, file)
 
+    # TODO: subnets should be registered, check subnets, subnet prefix lengths, and node interfaces
+    def validate_topology(self):
+        raise NotImplementedError()
+
     def to_group_vars_file(self):
-        if os.path.exists(self.interfaces_file_path): 
-            with open(self.interfaces_file_path, mode="r", newline="") as interfaces_file:
-                reader = csv.DictReader(interfaces_file)
-                fields = reader.fieldnames or []
-                
-                if _validate_fieldnames(set(fields), "interfaces"):
-                    group_vars_data = {"devices": {}}
-                    
-                    for row in reader:
-                        # define device role/s
-                        match row["roles"]:
-                            case "router": roles = CommentedSeq(["router"])
-                            case "host": roles = CommentedSeq(["host"])
-                            case _: roles = CommentedSeq(["Unknown"])
-                        roles.fa.set_flow_style()
-
-                        current_device = group_vars_data["devices"].setdefault(
-                            row["name"], 
-                            {"roles": roles}
-                        )
-
-                        if row.get("default_gateway"):  # assign default gateway for hosts
-                            current_device["default_gateway"] = row["default_gateway"]
-
-                        interfaces = current_device.setdefault("interfaces", {})
-                        current_interface = interfaces.setdefault(row["interface"], {})
-
-                        # assign IP address
-                        current_interface["ip_address"] = row["ip_address"]
-                        # assign OSPF area
-                        if row["ospf_area"]: current_interface["ospf_area"] = int(row["ospf_area"])
-                        # assign passive interface (if applicable)
-                        if row["ospf_passive"]: current_interface["ospf_passive"] = (row["ospf_passive"] == "true")
-                        
-                    with open(self.output_group_vars_file, "w") as f:
-                        yaml.dump(group_vars_data, f)
-        else:
-            print("interfaces.csv not detected")
+        with open(self.output_group_vars_file, "w") as file:
+            data = {"devices": self.devices}
+            yaml.dump(data, file)
 
     def create_ceos_switch_cli_file(self, name: str) -> str:
         switch_dir = self.main_dir / "configs" / name
@@ -193,36 +180,69 @@ class NetworkTopology:
             srlinux_switch_config.write("commit now")
 
         return f"configs/{name}/{name}.cli"
+    
+    # TODO: parse subnets.csv
+    def parse_subnets_csv(self):
+        raise NotImplementedError()
+
+    def parse_interfaces_csv(self):
+        with open(self.interfaces_file_path, "r") as interfaces_file:
+            reader = csv.DictReader(interfaces_file)
+            fields = reader.fieldnames or []
+            
+            if _validate_fieldnames(set(fields), "interfaces"):
+                for row in reader:
+                    # define device role/s
+                    match row["roles"]:
+                        case "router": roles = CommentedSeq(["router"])
+                        case "host": roles = CommentedSeq(["host"])
+                        case _: roles = CommentedSeq(["Unknown"])
+                    roles.fa.set_flow_style()
+
+                    current_device = self.devices.setdefault(row["name"], {"roles": roles})
+
+                    if row.get("default_gateway"):  # assign default gateway for hosts
+                        current_device["default_gateway"] = row["default_gateway"]
+
+                    interfaces = current_device.setdefault("interfaces", {})
+                    current_interface = interfaces.setdefault(row["interface"], {})
+
+                    # assign IP address
+                    current_interface["ip_address"] = row["ip_address"]
+                    # assign OSPF area
+                    if row["ospf_area"]: current_interface["ospf_area"] = int(row["ospf_area"])
+                    # assign passive interface (if applicable)
+                    if row["ospf_passive"]: current_interface["ospf_passive"] = (row["ospf_passive"] == "true")
+
+            else: raise ValueError("Interfaces header fields are inconsistent")
 
     def parse_links_csv(self):
-        try:
-            with open(self.links_file_path, mode="r", newline="") as links_file:
-                reader = csv.DictReader(links_file)
-                fields = reader.fieldnames or []
-                
-                if _validate_fieldnames(set(fields), "links"):
-                    links = []
-                    for row in reader:
-                        endpt_A = f"{row['device_a']}:{row['interface_a']}"
-                        endpt_B = f"{row['device_b']}:{row['interface_b']}"
-                        
-                        endpoints = CommentedSeq([endpt_A, endpt_B])
-                        endpoints.fa.set_flow_style()
-                        
-                        links.append({"endpoints": endpoints})
+        with open(self.links_file_path, mode="r", newline="") as links_file:
+            reader = csv.DictReader(links_file)
+            fields = reader.fieldnames or []
+            
+            if _validate_fieldnames(set(fields), "links"):
+                links = []
+                for row in reader:
+                    endpt_A = f"{row['device_a']}:{row['interface_a']}"
+                    endpt_B = f"{row['device_b']}:{row['interface_b']}"
+                    
+                    endpoints = CommentedSeq([endpt_A, endpt_B])
+                    endpoints.fa.set_flow_style()
+                    
+                    links.append({"endpoints": endpoints})
 
-                        for device, interface in [
-                            (row["device_a"], row["interface_a"]), 
-                            (row["device_b"], row["interface_b"])
-                        ]:
-                            if self.node_type[device] == "switch":   
-                                # {'sw1': {'e1-2', 'e1-1',... }}
-                                self.switch_interfaces.setdefault(device, set()).add(interface)
+                    for device, interface in [
+                        (row["device_a"], row["interface_a"]), 
+                        (row["device_b"], row["interface_b"])
+                    ]:
+                        if self.node_type[device] == "switch":   
+                            # {'sw1': {'e1-2', 'e1-1',... }}
+                            self.switch_interfaces.setdefault(device, set()).add(interface)
 
-                    self.links = links
-                else: 
-                    raise ValueError("Input header fields are inconsistent")
-        except Exception as e: print(e)
+                self.links = links
+            else: 
+                raise ValueError("Links header fields are inconsistent")
     
     def create_daemons_file(self, device_name, protocols: str):
         r"""
@@ -247,48 +267,46 @@ class NetworkTopology:
                 f.write(f"{daemon}={enabled}\n")
 
     def parse_nodes_csv(self):
-        try:
-            with open(self.nodes_file_path, mode="r", newline="") as nodes_file:
-                reader = csv.DictReader(nodes_file)
-                fields = reader.fieldnames or []
-                
-                if _validate_fieldnames(set(fields), "nodes"):            
-                    for row in reader: 
-                        kind = "linux"
-                        match row["type"]:
-                            case "router": 
-                                if not row["protocols"]:
-                                    self.nodes[row["name"]] = {
-                                        "kind": kind, 
-                                        "image": DEFAULT_ROUTER_IMAGE
-                                    }
-                                else:
-                                    # create daemon file for this (router) node
-                                    self.create_daemons_file(row["name"], row["protocols"])
-                                    self.nodes[row["name"]] = {
-                                        "kind": kind, 
-                                        "image": DEFAULT_ROUTER_IMAGE,
-                                        "binds": [
-                                            f"configs/{row["name"]}/daemons:/etc/frr/daemons"
-                                        ],
-                                        "exec": ["touch /etc/frr/vtysh.conf"]
-                                    }
-                                self.node_type[row["name"]] = "router"
-
-                            case "host": self.nodes[row["name"]] = {
-                                    "kind": kind, 
-                                    "image": DEFAULT_HOST_IMAGE,
-                                }; self.node_type[row["name"]] = "host"
-
-                            case "switch":
+        with open(self.nodes_file_path, mode="r", newline="") as nodes_file:
+            reader = csv.DictReader(nodes_file)
+            fields = reader.fieldnames or []
+            
+            if _validate_fieldnames(set(fields), "nodes"):            
+                for row in reader: 
+                    kind = "linux"
+                    match row["type"]:
+                        case "router": 
+                            if not row["protocols"]:
                                 self.nodes[row["name"]] = {
-                                    "kind": self.switch_kind,
-                                    "image": self._get_switch_image(),
-                                    "startup-config": f"configs/{row["name"]}/{row["name"]}.cli"
-                                }; self.node_type[row["name"]] = "switch"
-                else:
-                    raise ValueError("Input header fields are inconsistent")  
-        except Exception as e: print(e)
+                                    "kind": kind, 
+                                    "image": DEFAULT_ROUTER_IMAGE
+                                }
+                            else:
+                                # create daemon file for this (router) node
+                                self.create_daemons_file(row["name"], row["protocols"])
+                                self.nodes[row["name"]] = {
+                                    "kind": kind, 
+                                    "image": DEFAULT_ROUTER_IMAGE,
+                                    "binds": [
+                                        f"configs/{row["name"]}/daemons:/etc/frr/daemons"
+                                    ],
+                                    "exec": ["touch /etc/frr/vtysh.conf"]
+                                }
+                            self.node_type[row["name"]] = "router"
+
+                        case "host": self.nodes[row["name"]] = {
+                                "kind": kind, 
+                                "image": DEFAULT_HOST_IMAGE,
+                            }; self.node_type[row["name"]] = "host"
+
+                        case "switch":
+                            self.nodes[row["name"]] = {
+                                "kind": self.switch_kind,
+                                "image": self._get_switch_image(),
+                                "startup-config": f"configs/{row["name"]}/{row["name"]}.cli"
+                            }; self.node_type[row["name"]] = "switch"
+            else:
+                raise ValueError("Nodes header fields are inconsistent")  
 
 if __name__ == "__main__": 
     parser = argparse.ArgumentParser()
@@ -311,7 +329,12 @@ if __name__ == "__main__":
     if no_interfaces: print("interfaces.csv not detected")
     
     if not (no_nodes or no_links or no_interfaces):
-        topology = NetworkTopology(args.name, args.group, args.inputs, switch_kind=args.switch)
-        topology.to_group_vars_file()
-        topology.to_clab_yml()
+        topology = NetworkTopology(args.name, args.group, args.inputs, 
+                                   switch_kind=args.switch,
+                                   nodes_file_path=nodes_file_path,
+                                   links_file_path=links_file_path,
+                                   interfaces_file_path=interfaces_file_path
+                                   )
+                                   
+        topology.write_all()
         print("*** Successfully defined topology ***\n")
