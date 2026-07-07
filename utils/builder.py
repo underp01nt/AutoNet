@@ -143,6 +143,8 @@ class NetworkTopology:
                         current_interface["ip_address"] = row["ip_address"]
                         # assign OSPF area
                         if row["ospf_area"]: current_interface["ospf_area"] = int(row["ospf_area"])
+                        # assign passive interface (if applicable)
+                        if row["ospf_passive"]: current_interface["ospf_passive"] = (row["ospf_passive"] == "true")
                         
                     with open(self.output_group_vars_file, "w") as f:
                         yaml.dump(group_vars_data, f)
