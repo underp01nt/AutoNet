@@ -94,9 +94,9 @@ class NetworkTopology:
         self.subnets_file_path = filepaths.get("subnets_file_path", None)      # OPTIONAL FILE
 
         # parse each input csv file
-        self.parse_nodes_csv()
-        self.parse_links_csv()
         self.parse_interfaces_csv()
+        self.parse_nodes_csv()      
+        self.parse_links_csv() 
         
         if self.subnets_file_path: 
             self.parse_subnets_csv()
@@ -212,7 +212,8 @@ class NetworkTopology:
                     # assign OSPF area
                     if row["ospf_area"]: current_interface["ospf_area"] = int(row["ospf_area"])
                     # assign passive interface (if applicable)
-                    if row["ospf_passive"]: current_interface["ospf_passive"] = (row["ospf_passive"] == "true")
+                    if row["ospf_passive"]: 
+                        current_interface["ospf_passive"] = (row["ospf_passive"] == "true")
 
             else: raise ValueError("Interfaces header fields are inconsistent")
 
@@ -244,20 +245,19 @@ class NetworkTopology:
             else: 
                 raise ValueError("Links header fields are inconsistent")
     
-    def create_daemons_file(self, device_name, protocols: str):
+    def create_daemons_file(self, device_name, protocols: list[str]):
         r"""
             Creates a daemons file for a device\n
-            :protocols: string of routing protocol/s (example: "ospf;bgp", "bgp; ospf", "bgp")
+            :protocols: list of routing protocol/s used by this device (example: ["ospf", bgp"]
         """
-        parsed_protocols = [p for p in protocols.split(";") if p.strip()]
         
         with open("templates/daemons.json") as f: 
             daemons = json.load(f)
-            for parsed_protocol in parsed_protocols:
-                daemon = PROTOCOLS_TO_DAEMONS.get(parsed_protocol)
+            for protocol in protocols:
+                daemon = PROTOCOLS_TO_DAEMONS.get(protocol)
 
                 if daemon: daemons[daemon] = "yes"
-                else: raise ValueError(f"Invalid protocol name: {parsed_protocol}")
+                else: raise ValueError(f"Invalid protocol name: {protocol}")
 
         device_dir = self.main_dir / "configs" / device_name
         device_dir.mkdir(parents=True, exist_ok=True) 
@@ -282,8 +282,12 @@ class NetworkTopology:
                                     "image": DEFAULT_ROUTER_IMAGE
                                 }
                             else:
+                                parsed_protocols = [p for p in row["protocols"].split(";") if p.strip()]
+                                self.devices[row["name"]]["protocols"] = parsed_protocols
+
                                 # create daemon file for this (router) node
-                                self.create_daemons_file(row["name"], row["protocols"])
+                                self.create_daemons_file(row["name"], parsed_protocols)
+                                
                                 self.nodes[row["name"]] = {
                                     "kind": kind, 
                                     "image": DEFAULT_ROUTER_IMAGE,
