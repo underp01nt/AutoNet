@@ -3,12 +3,12 @@ r"""
     
     Options:
         **[REQUIRED]**
-            `inputs`: "inputs" folder containing [nodes.csv, links.csv, interfaces.csv]
+            `inputs`: "inputs" folder containing [nodes.csv, links.csv, interfaces.csv, bgp.csv (not required)]
             
         **[OPTIONAL]**
             `--name`: topology name
             `--group`: Ansible group name for group_vars
-            `--switch`: Docker container kind for switch OS  (currently supporting nokia_srlinux and arista_ceos)
+            `--switch`: Docker container kind for switch OS  (nokia_srlinux, arista_ceos)
 
     Program output:
         - *.clab.yml: Containerlab deployment file
@@ -28,7 +28,6 @@ r"""
             - nokia_srlinux: ethernet-<slot>/<port>
 """
 
-from ipaddress import IPv4Interface
 from pathlib import Path
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedSeq
@@ -39,6 +38,7 @@ import argparse, csv, json, os
 EXPECTED_NODES_CSV_FIELDS = ["name", "type"]
 EXPECTED_INTERFACES_CSV_FIELDS = ["name", "interface", "ip_address", "roles"]
 EXPECTED_LINKS_CSV_FIELDS = ["device_a", "interface_a", "device_b", "interface_b"]
+EXPECTED_BGP_CSV_FIELDS = ["router", "redistribute", "networks"]
 
 # router images
 DEFAULT_ROUTER_IMAGE = "frrouting/frr:latest"
@@ -56,19 +56,20 @@ PROTOCOLS_TO_DAEMONS = {"bgp": "bgpd", "ospf": "ospfd", "isis": "isisd","rip": "
 yaml = YAML()
 yaml.indent(mapping=2, sequence=4, offset=2)
 
-def _validate_fieldnames(fields: set, mode: Literal["nodes", "links", "interfaces"]) -> bool:
+def _validate_fieldnames(fields: set, mode: Literal["nodes", "links", "interfaces", "bgp"]) -> bool:
     match mode:
         case "nodes": return set(EXPECTED_NODES_CSV_FIELDS).issubset(fields)
         case "links": return set(EXPECTED_LINKS_CSV_FIELDS).issubset(fields)
         case "interfaces": return set(EXPECTED_INTERFACES_CSV_FIELDS).issubset(fields)
+        case "bgp": return set(EXPECTED_BGP_CSV_FIELDS).issubset(fields)
 
 class NetworkTopology:
     r"""
     Stores node-related data for generating configs and .clab.yml artifacts
     """
     def __init__(self, name: str, group: str, inputs_dir: str, switch_kind="arista_ceos", **filepaths):
-        self.name = name if name else "my-network"  # assigns containerlab name
-        self.devices: dict = {}   # stores group_vars file data
+        self.name = name if name else "my-network"        # assigns containerlab name
+        self.devices: dict = {}                           # stores group_vars file data
 
         # defines nodes and links data for .clab.yml
         self.nodes: dict = {}
@@ -91,15 +92,13 @@ class NetworkTopology:
         self.nodes_file_path: Path = filepaths["nodes_file_path"]              # REQUIRED FILE
         self.links_file_path: Path  = filepaths["links_file_path"]             # REQUIRED FILE
         self.interfaces_file_path: Path = filepaths["interfaces_file_path"]    # REQUIRED FILE
-        self.subnets_file_path = filepaths.get("subnets_file_path", None)      # OPTIONAL FILE
+        self.bgp_file_path = filepaths.get("bgp_file_path", None)              # OPTIONAL FILE
 
-        # parse each input csv file
-        self.parse_interfaces_csv()
-        self.parse_nodes_csv()      
-        self.parse_links_csv() 
-        
-        if self.subnets_file_path: 
-            self.parse_subnets_csv()
+        # parse each input csv file      
+        self.parse_interfaces_csv()                      # builds self.devices
+        self.parse_nodes_csv()                           # builds self.nodes
+        self.parse_links_csv()                           # builds self.links
+        if self.bgp_file_path: self.parse_bgp_csv()
 
         # validate the newly created topology to detect any network inconsistencies
         # self.validate_topology()
@@ -181,9 +180,21 @@ class NetworkTopology:
 
         return f"configs/{name}/{name}.cli"
     
-    # TODO: parse subnets.csv
-    def parse_subnets_csv(self):
-        raise NotImplementedError()
+    def parse_bgp_csv(self):
+        if not self.bgp_file_path: return
+        else:
+            with open(self.bgp_file_path, "r") as bgp_file:
+                reader = csv.DictReader(bgp_file)
+                fields = reader.fieldnames or []
+
+                if _validate_fieldnames(set(fields), "bgp"):
+                    for row in reader:
+                        self.devices[row["router"]]["bgp"] = {
+                            "redistribute": row["redistribute"].split(";"),
+                            "networks": row["networks"].split(";") if row["networks"] else []
+                        }
+
+                else: raise ValueError("BGP header fields are inconsistent")
 
     def parse_interfaces_csv(self):
         with open(self.interfaces_file_path, "r") as interfaces_file:
@@ -247,7 +258,8 @@ class NetworkTopology:
     
     def create_daemons_file(self, device_name, protocols: list[str]):
         r"""
-            Creates a daemons file for a device\n
+            Creates a daemons file for a device
+            
             :protocols: list of routing protocol/s used by this device (example: ["ospf", bgp"]
         """
         
@@ -282,8 +294,12 @@ class NetworkTopology:
                                     "image": DEFAULT_ROUTER_IMAGE
                                 }
                             else:
+                                # parse protocols field
                                 parsed_protocols = [p for p in row["protocols"].split(";") if p.strip()]
                                 self.devices[row["name"]]["protocols"] = parsed_protocols
+                                
+                                # parse Autonomous System Number (ASN) field
+                                self.devices[row["name"]]["asn"] = int(row["asn"])
 
                                 # create daemon file for this (router) node
                                 self.create_daemons_file(row["name"], parsed_protocols)
@@ -323,6 +339,7 @@ if __name__ == "__main__":
     nodes_file_path = os.path.join(args.inputs, "nodes.csv")
     links_file_path = os.path.join(args.inputs, "links.csv")
     interfaces_file_path = os.path.join(args.inputs, "interfaces.csv")
+    bgp_file_path = os.path.join(args.inputs, "bgp.csv")
 
     no_nodes = not os.path.exists(nodes_file_path)
     no_links = not os.path.exists(links_file_path)
@@ -337,7 +354,8 @@ if __name__ == "__main__":
                                    switch_kind=args.switch,
                                    nodes_file_path=nodes_file_path,
                                    links_file_path=links_file_path,
-                                   interfaces_file_path=interfaces_file_path
+                                   interfaces_file_path=interfaces_file_path,
+                                   bgp_file_path=bgp_file_path,
                                    )
                                    
         topology.write_all()
