@@ -28,11 +28,16 @@ r"""
             - nokia_srlinux: ethernet-<slot>/<port>
 """
 
+from ipaddress import ip_interface
 from pathlib import Path
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedSeq
 from typing import Literal
-import argparse, csv, json, os
+
+import argparse
+import csv
+import json
+import os
 
 # minimum fields to qualify for YML builds
 EXPECTED_NODES_CSV_FIELDS = ["name", "type"]
@@ -73,7 +78,7 @@ class NetworkTopology:
 
         # defines nodes and links data for .clab.yml
         self.nodes: dict = {}
-        self.links: list[dict] = []
+        self.links: list[dict] = []  # list of "endpoints" dict (e.g. [{endpoints: ["pc1:eth2, r1:eth1"]}, ...])
 
         # defines node-type mapping (e.g. r1: router)
         self.node_type: dict[str, str] = {}
@@ -180,6 +185,47 @@ class NetworkTopology:
 
         return f"configs/{name}/{name}.cli"
     
+    def translate_bgp_neighbors(self, router: str, neighbors: list[str]) -> list[dict]:
+        r"""
+            Translates neighbor hostnames to AS-aware peer IP addresses and AS numbers for BGP adjacency
+
+            :router: name of router
+            :neighbors: list of neighbors specified by user for this router
+        """ 
+        peers = set()
+
+        for neighbor in neighbors:  
+            # iBGP, just get peer's loopback address
+            if self.devices[router]["asn"] == self.devices[neighbor]["asn"]:
+                peers.add(
+                    (
+                        self.devices[neighbor]["interfaces"]["lo"]["ip_address"],
+                        self.devices[neighbor]["asn"]
+                    )
+                )
+            else: 
+                # eBGP
+                for link in self.links: 
+                    a, b = link["endpoints"]
+
+                    router_a, intf_a = a.split(":")
+                    router_b, intf_b = b.split(":")
+
+                    ip_address, asn = None, None
+
+                    if router_a == router and router_b == neighbor:
+                        ip_address = ip_interface(self.devices[router_b]["interfaces"][intf_b]["ip_address"]).ip
+                        asn = self.devices[neighbor]["asn"]
+
+                    elif router_b == router and router_a == neighbor:
+                        ip_address = ip_interface(self.devices[router_a]["interfaces"][intf_a]["ip_address"]).ip
+                        asn = self.devices[router_a]["asn"] 
+                    
+                    if ip_address and asn:
+                        peers.add((ip_address, asn))
+        
+        return [{"ip_address": str(ip), "asn": asn} for ip, asn in peers]
+    
     def parse_bgp_csv(self):
         if not self.bgp_file_path: return
         else:
@@ -189,11 +235,14 @@ class NetworkTopology:
 
                 if _validate_fieldnames(set(fields), "bgp"):
                     for row in reader:
-                        self.devices[row["router"]]["bgp"] = {
-                            "redistribute": row["redistribute"].split(";"),
-                            "networks": row["networks"].split(";") if row["networks"] else []
-                        }
-
+                            parsed_neighbors_row = row["neighbors"].split(";")
+                            neighbors: list[dict] = self.translate_bgp_neighbors(row["router"], parsed_neighbors_row)
+                            
+                            self.devices[row["router"]]["bgp"] = {
+                                "redistribute": row["redistribute"].split(";"),
+                                "networks": row["networks"].split(";") if row["networks"] else [],
+                                "neighbors": neighbors
+                            }
                 else: raise ValueError("BGP header fields are inconsistent")
 
     def parse_interfaces_csv(self):
