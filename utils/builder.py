@@ -3,7 +3,7 @@ r"""
     
     Options:
         **[REQUIRED]**
-            `inputs`: "inputs" folder containing [nodes.csv, links.csv, interfaces.csv, bgp.csv (not required)]
+            `inputs`: "inputs" folder containing at least: [nodes.csv, links.csv, interfaces.csv]
             
         **[OPTIONAL]**
             `--name`: topology name
@@ -32,7 +32,7 @@ from ipaddress import ip_interface
 from pathlib import Path
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedSeq
-from typing import Literal
+from typing import Literal, Optional
 
 import argparse
 import csv
@@ -43,7 +43,6 @@ import os
 EXPECTED_NODES_CSV_FIELDS = ["name", "type"]
 EXPECTED_INTERFACES_CSV_FIELDS = ["name", "interface", "ip_address", "roles"]
 EXPECTED_LINKS_CSV_FIELDS = ["device_a", "interface_a", "device_b", "interface_b"]
-EXPECTED_BGP_CSV_FIELDS = ["router", "redistribute", "networks"]
 
 # router images
 DEFAULT_ROUTER_IMAGE = "frrouting/frr:latest"
@@ -61,12 +60,11 @@ PROTOCOLS_TO_DAEMONS = {"bgp": "bgpd", "ospf": "ospfd", "isis": "isisd","rip": "
 yaml = YAML()
 yaml.indent(mapping=2, sequence=4, offset=2)
 
-def _validate_fieldnames(fields: set, mode: Literal["nodes", "links", "interfaces", "bgp"]) -> bool:
+def _validate_fieldnames(fields: set, mode: Literal["nodes", "links", "interfaces"]) -> bool:
     match mode:
         case "nodes": return set(EXPECTED_NODES_CSV_FIELDS).issubset(fields)
         case "links": return set(EXPECTED_LINKS_CSV_FIELDS).issubset(fields)
         case "interfaces": return set(EXPECTED_INTERFACES_CSV_FIELDS).issubset(fields)
-        case "bgp": return set(EXPECTED_BGP_CSV_FIELDS).issubset(fields)
 
 class NetworkTopology:
     r"""
@@ -87,6 +85,9 @@ class NetworkTopology:
         # option to use SR Linux or cEOS
         self.switch_kind = switch_kind
 
+        # global configurations
+        self.globals: Optional[dict] = None
+
         # I/O related attributes
         self.main_dir = Path(inputs_dir).parent
         self.output_clab_file = self.main_dir / f"{name or "topology"}.clab.yml"
@@ -98,12 +99,15 @@ class NetworkTopology:
         self.links_file_path: Path  = filepaths["links_file_path"]             # REQUIRED FILE
         self.interfaces_file_path: Path = filepaths["interfaces_file_path"]    # REQUIRED FILE
         self.bgp_file_path = filepaths.get("bgp_file_path", None)              # OPTIONAL FILE
+        self.policy_file_path = filepaths.get("policy_file_path", None)
 
         # parse each input csv file      
         self.parse_interfaces_csv()                      # builds self.devices
         self.parse_nodes_csv()                           # builds self.nodes
         self.parse_links_csv()                           # builds self.links
-        if self.bgp_file_path: self.parse_bgp_csv()
+        # parse optional yml files
+        self.parse_bgp_file()
+        self.parse_policy_file()
 
         # validate the newly created topology to detect any network inconsistencies
         # self.validate_topology()
@@ -140,6 +144,7 @@ class NetworkTopology:
     def to_group_vars_file(self):
         with open(self.output_group_vars_file, "w") as file:
             data = {"devices": self.devices}
+            if self.globals: data["globals"] = self.globals
             yaml.dump(data, file)
 
     def create_ceos_switch_cli_file(self, name: str) -> str:
@@ -195,55 +200,78 @@ class NetworkTopology:
         peers = set()
 
         for neighbor in neighbors:  
-            # iBGP, just get peer's loopback address
-            if self.devices[router]["asn"] == self.devices[neighbor]["asn"]:
-                peers.add(
-                    (
-                        self.devices[neighbor]["interfaces"]["lo"]["ip_address"],
-                        self.devices[neighbor]["asn"]
-                    )
-                )
-            else: 
-                # eBGP
-                for link in self.links: 
-                    a, b = link["endpoints"]
+            # iBGP, just get peer's loopback address  (only when theres IGP underlay to advertise loopbacks)
+            # if self.devices[router]["asn"] == self.devices[neighbor]["asn"]:
+            #     peers.add(
+            #         (
+            #             ip_interface(self.devices[neighbor]["interfaces"]["lo"]["ip_address"]).ip,
+            #             self.devices[neighbor]["asn"]
+            #         )
+            #     )
+            # else: 
 
-                    router_a, intf_a = a.split(":")
-                    router_b, intf_b = b.split(":")
+            # eBGP
+            for link in self.links: 
+                a, b = link["endpoints"]
 
-                    ip_address, asn = None, None
+                node_a, intf_a = a.split(":")
+                node_b, intf_b = b.split(":")
 
-                    if router_a == router and router_b == neighbor:
-                        ip_address = ip_interface(self.devices[router_b]["interfaces"][intf_b]["ip_address"]).ip
-                        asn = self.devices[neighbor]["asn"]
+                if self.devices[node_a].get("bgp") and self.devices[node_b].get("bgp"):
+                    ip_address, remote_as = None, None  
 
-                    elif router_b == router and router_a == neighbor:
-                        ip_address = ip_interface(self.devices[router_a]["interfaces"][intf_a]["ip_address"]).ip
-                        asn = self.devices[router_a]["asn"] 
+                    if node_a == router and node_b == neighbor:
+                        ip_address = ip_interface(self.devices[node_b]["interfaces"][intf_b]["ip_address"]).ip
+                        remote_as = self.devices[neighbor]["bgp"]["asn"]
+ 
+                    elif node_b == router and node_a == neighbor:
+                        ip_address = ip_interface(self.devices[node_a]["interfaces"][intf_a]["ip_address"]).ip
+                        remote_as = self.devices[node_a]["bgp"]["asn"] 
                     
-                    if ip_address and asn:
-                        peers.add((ip_address, asn))
-        
-        return [{"ip_address": str(ip), "asn": asn} for ip, asn in peers]
+                    if ip_address and remote_as:
+                        peers.add((ip_address, remote_as))
+
+        return [{"ip_address": str(ip), "remote_as": remote_as} for ip, remote_as in peers]
     
-    def parse_bgp_csv(self):
+    def parse_bgp_file(self):
         if not self.bgp_file_path: return
         else:
-            with open(self.bgp_file_path, "r") as bgp_file:
-                reader = csv.DictReader(bgp_file)
-                fields = reader.fieldnames or []
+            with open(self.bgp_file_path, "r") as file:
+                data = yaml.load(file)
+                bgp_routers = data["bgp"]["routers"]
 
-                if _validate_fieldnames(set(fields), "bgp"):
-                    for row in reader:
-                            parsed_neighbors_row = row["neighbors"].split(";")
-                            neighbors: list[dict] = self.translate_bgp_neighbors(row["router"], parsed_neighbors_row)
-                            
-                            self.devices[row["router"]]["bgp"] = {
-                                "redistribute": row["redistribute"].split(";"),
-                                "networks": row["networks"].split(";") if row["networks"] else [],
-                                "neighbors": neighbors
-                            }
-                else: raise ValueError("BGP header fields are inconsistent")
+                if data["bgp"].get("globals"):
+                    self.globals = data["bgp"]["globals"]
+
+                for router, config in bgp_routers.items():
+                    self.devices[router]["bgp"] = {"asn": config["asn"]}
+
+                    if config.get("networks"): 
+                        self.devices[router]["bgp"]["networks"] = config["networks"]
+                    if config.get("neighbors"):
+                        self.devices[router]["bgp"]["neighbors"] = config["neighbors"]
+
+                # all bgp metadata retrieved, resolve neighbor identity to relevant metadata
+                for router, config in self.devices.items():
+                    if "bgp" not in config:
+                        continue
+
+                    neighbors = config["bgp"]["neighbors"]
+                    config["bgp"]["neighbors"] = self.translate_bgp_neighbors(router, neighbors)
+
+    def parse_policy_file(self):
+        if not self.policy_file_path: return
+        else:
+            with open(self.policy_file_path, "r") as file:
+                routing_policy = yaml.load(file)["routing_policy"]
+                redistribute = routing_policy.get("redistribute", {})
+
+                for router, protocols in redistribute.items():
+                    if "ospf" in protocols:
+                        self.devices[router]["ospf"]["redistribute"] = protocols["ospf"]
+
+                    if "bgp" in protocols:
+                        self.devices[router]["bgp"]["redistribute"] = protocols["bgp"]
 
     def parse_interfaces_csv(self):
         with open(self.interfaces_file_path, "r") as interfaces_file:
@@ -347,9 +375,6 @@ class NetworkTopology:
                                 parsed_protocols = [p for p in row["protocols"].split(";") if p.strip()]
                                 self.devices[row["name"]]["protocols"] = parsed_protocols
                                 
-                                # parse Autonomous System Number (ASN) field
-                                self.devices[row["name"]]["asn"] = int(row["asn"])
-
                                 # create daemon file for this (router) node
                                 self.create_daemons_file(row["name"], parsed_protocols)
                                 
@@ -374,6 +399,10 @@ class NetworkTopology:
                                 "image": self._get_switch_image(),
                                 "startup-config": f"configs/{row["name"]}/{row["name"]}.cli"
                             }; self.node_type[row["name"]] = "switch"
+
+                            roles = CommentedSeq(["switch"])
+                            roles.fa.set_flow_style()
+                            self.devices[row["name"]] = {"roles": roles}
             else:
                 raise ValueError("Nodes header fields are inconsistent")  
 
@@ -388,7 +417,9 @@ if __name__ == "__main__":
     nodes_file_path = os.path.join(args.inputs, "nodes.csv")
     links_file_path = os.path.join(args.inputs, "links.csv")
     interfaces_file_path = os.path.join(args.inputs, "interfaces.csv")
-    bgp_file_path = os.path.join(args.inputs, "bgp.csv")
+    
+    bgp_file_path = os.path.join(args.inputs, "bgp.yml")
+    policy_file_path = os.path.join(args.inputs, "routing_policy.yml")
 
     no_nodes = not os.path.exists(nodes_file_path)
     no_links = not os.path.exists(links_file_path)
@@ -405,6 +436,7 @@ if __name__ == "__main__":
                                    links_file_path=links_file_path,
                                    interfaces_file_path=interfaces_file_path,
                                    bgp_file_path=bgp_file_path,
+                                   policy_file_path=policy_file_path,
                                    )
                                    
         topology.write_all()
