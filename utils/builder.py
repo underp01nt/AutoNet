@@ -99,15 +99,16 @@ class NetworkTopology:
         self.links_file_path: Path  = filepaths["links_file_path"]             # REQUIRED FILE
         self.interfaces_file_path: Path = filepaths["interfaces_file_path"]    # REQUIRED FILE
         self.bgp_file_path = filepaths.get("bgp_file_path", None)              # OPTIONAL FILE
-        self.policy_file_path = filepaths.get("policy_file_path", None)
+        self.policy_file_path = filepaths.get("policy_file_path", None)        # OPTIONAL FILE
 
         # parse each input csv file      
         self.parse_interfaces_csv()                      # builds self.devices
         self.parse_nodes_csv()                           # builds self.nodes
         self.parse_links_csv()                           # builds self.links
+        
         # parse optional yml files
-        self.parse_bgp_file()
-        self.parse_policy_file()
+        if self.bgp_file_path and os.path.exists(self.bgp_file_path): self.parse_bgp_file()
+        if self.policy_file_path and os.path.exists(self.policy_file_path): self.parse_bgp_file()
 
         # validate the newly created topology to detect any network inconsistencies
         # self.validate_topology()
@@ -148,6 +149,9 @@ class NetworkTopology:
             yaml.dump(data, file)
 
     def create_ceos_switch_cli_file(self, name: str) -> str:
+        r"""
+            Creates a .cli file for a cEOS switch, returns path of the .cli file
+        """
         switch_dir = self.main_dir / "configs" / name
         switch_dir.mkdir(parents=True, exist_ok=True)
 
@@ -165,7 +169,7 @@ class NetworkTopology:
 
     def create_srlinux_switch_cli_file(self, name: str) -> str:
         r"""
-            Creates a .cli file for a switch, returns path of the .cli file
+            Creates a .cli file for an SR-Linux switch, returns path of the .cli file
         """
 
         switch_dir = self.main_dir / "configs" / name
@@ -288,10 +292,6 @@ class NetworkTopology:
                     roles.fa.set_flow_style()
 
                     current_device = self.devices.setdefault(row["name"], {"roles": roles})
-
-                    if row.get("default_gateway"):  # assign default gateway for hosts
-                        current_device["default_gateway"] = row["default_gateway"]
-
                     interfaces = current_device.setdefault("interfaces", {})
                     current_interface = interfaces.setdefault(row["interface"], {})
 
@@ -360,8 +360,11 @@ class NetworkTopology:
             reader = csv.DictReader(nodes_file)
             fields = reader.fieldnames or []
             
-            if _validate_fieldnames(set(fields), "nodes"):            
+            if _validate_fieldnames(set(fields), "nodes"):    
                 for row in reader: 
+                    if row.get("next_hop"):  
+                        self.devices[row["name"]]["next_hop"] = row["next_hop"]
+
                     kind = "linux"
                     match row["type"]:
                         case "router": 
