@@ -95,11 +95,15 @@ class NetworkTopology:
         (self.main_dir / f"group_vars").mkdir(parents=True, exist_ok=True)
         self.output_group_vars_file = self.main_dir / f"group_vars" / f"{group or "group"}.yml"
         
-        self.nodes_file_path: Path = filepaths["nodes_file_path"]              # REQUIRED FILE
-        self.links_file_path: Path  = filepaths["links_file_path"]             # REQUIRED FILE
-        self.interfaces_file_path: Path = filepaths["interfaces_file_path"]    # REQUIRED FILE
-        self.bgp_file_path = filepaths.get("bgp_file_path", None)              # OPTIONAL FILE
-        self.policy_file_path = filepaths.get("policy_file_path", None)        # OPTIONAL FILE
+        # REQUIRED FILES
+        self.nodes_file_path: Path = filepaths["nodes_file_path"]              
+        self.links_file_path: Path  = filepaths["links_file_path"]             
+        self.interfaces_file_path: Path = filepaths["interfaces_file_path"]    
+
+        # OPTIONAL FILES
+        self.ospf_file_path = filepaths.get("ospf_file_path", None)            
+        self.bgp_file_path = filepaths.get("bgp_file_path", None)              
+        self.policy_file_path = filepaths.get("policy_file_path", None)        
 
         # parse each input csv file      
         self.parse_interfaces_csv()                      # builds self.devices
@@ -107,6 +111,7 @@ class NetworkTopology:
         self.parse_links_csv()                           # builds self.links
         
         # parse optional yml files
+        if self.ospf_file_path and os.path.exists(self.ospf_file_path): self.parse_ospf_file()
         if self.bgp_file_path and os.path.exists(self.bgp_file_path): self.parse_bgp_file()
         if self.policy_file_path and os.path.exists(self.policy_file_path): self.parse_bgp_file()
 
@@ -194,6 +199,26 @@ class NetworkTopology:
 
         return f"configs/{name}/{name}.cli"
     
+    def parse_ospf_file(self):
+        if not self.ospf_file_path: return
+        else:
+            with open(self.ospf_file_path, "r") as f:
+                data = yaml.load(f)
+                ospf_routers = data["ospf"]["routers"]
+
+                for router, config in ospf_routers.items():
+                    for interface, int_config in config["interfaces"].items():
+                        self.devices[router]["interfaces"][interface].setdefault("ospf", {})
+
+                        area = int_config.get("ospf_area", None)
+                        passiveness = int_config.get("ospf_passive", None)
+
+                        if area is not None: 
+                            self.devices[router]["interfaces"][interface]["ospf"]["area"] = int(area)
+
+                        if passiveness is not None: 
+                            self.devices[router]["interfaces"][interface]["ospf"]["passive"] = passiveness
+
     def translate_bgp_neighbors(self, router: str, neighbors: list[str]) -> list[dict]:
         r"""
             Translates neighbor hostnames to AS-aware peer IP addresses and AS numbers for BGP adjacency
@@ -297,11 +322,6 @@ class NetworkTopology:
 
                     # assign IP address
                     current_interface["ip_address"] = row["ip_address"]
-                    # assign OSPF area
-                    if row["ospf_area"]: current_interface["ospf_area"] = int(row["ospf_area"])
-                    # assign passive interface (if applicable)
-                    if row["ospf_passive"]: 
-                        current_interface["ospf_passive"] = (row["ospf_passive"] == "true")
 
             else: raise ValueError("Interfaces header fields are inconsistent")
 
@@ -421,6 +441,7 @@ if __name__ == "__main__":
     links_file_path = os.path.join(args.inputs, "links.csv")
     interfaces_file_path = os.path.join(args.inputs, "interfaces.csv")
     
+    ospf_file_path = os.path.join(args.inputs, "ospf.yml")
     bgp_file_path = os.path.join(args.inputs, "bgp.yml")
     policy_file_path = os.path.join(args.inputs, "routing_policy.yml")
 
@@ -438,6 +459,7 @@ if __name__ == "__main__":
                                    nodes_file_path=nodes_file_path,
                                    links_file_path=links_file_path,
                                    interfaces_file_path=interfaces_file_path,
+                                   ospf_file_path=ospf_file_path,
                                    bgp_file_path=bgp_file_path,
                                    policy_file_path=policy_file_path,
                                    )
