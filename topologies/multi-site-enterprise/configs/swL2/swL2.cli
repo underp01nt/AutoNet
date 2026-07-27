@@ -1,6 +1,10 @@
-hostname swB
+hostname swL2
 conf t
 
+interface eth3
+  no shut
+  switchport
+!
 interface eth1
   no shut
   switchport

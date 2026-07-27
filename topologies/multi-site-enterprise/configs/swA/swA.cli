@@ -1,11 +1,11 @@
 hostname swA
 conf t
 
-interface eth2
+interface eth1
   no shut
   switchport
 !
-interface eth1
+interface eth2
   no shut
   switchport
 !

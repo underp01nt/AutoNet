@@ -1,0 +1,19 @@
+hostname swL1
+conf t
+
+interface eth4
+  no shut
+  switchport
+!
+interface eth3
+  no shut
+  switchport
+!
+interface eth1
+  no shut
+  switchport
+!
+interface eth2
+  no shut
+  switchport
+!

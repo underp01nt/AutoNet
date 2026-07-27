@@ -34,8 +34,56 @@ topology:
       image: frrouting/frr:latest
       binds:
         - configs/access/daemons:/etc/frr/daemons
+        - configs/access/firewall.sh:/usr/local/bin/firewall.sh
       exec:
         - touch /etc/frr/vtysh.conf
+    pe1:
+      kind: linux
+      image: frrouting/frr:latest
+      binds:
+        - configs/pe1/daemons:/etc/frr/daemons
+      exec:
+        - touch /etc/frr/vtysh.conf
+    pe2:
+      kind: linux
+      image: frrouting/frr:latest
+      binds:
+        - configs/pe2/daemons:/etc/frr/daemons
+      exec:
+        - touch /etc/frr/vtysh.conf
+    services:
+      kind: linux
+      image: frrouting/frr:latest
+      binds:
+        - configs/services/daemons:/etc/frr/daemons
+        - configs/services/firewall.sh:/usr/local/bin/firewall.sh
+      exec:
+        - touch /etc/frr/vtysh.conf
+    swS1:
+      kind: arista_ceos
+      image: ceos:4.36.1F
+      startup-config: configs/swS1/swS1.cli
+    swS2:
+      kind: arista_ceos
+      image: ceos:4.36.1F
+      startup-config: configs/swS2/swS2.cli
+    swL1:
+      kind: arista_ceos
+      image: ceos:4.36.1F
+      startup-config: configs/swL1/swL1.cli
+    swL2:
+      kind: arista_ceos
+      image: ceos:4.36.1F
+      startup-config: configs/swL2/swL2.cli
+    server1:
+      kind: linux
+      image: alpine:latest
+    server2:
+      kind: linux
+      image: alpine:latest
+    db:
+      kind: linux
+      image: alpine:latest
   links:
     - endpoints: [pc1:eth1, swA:eth2]
     - endpoints: [pc2:eth1, swB:eth2]
@@ -44,3 +92,19 @@ topology:
     - endpoints: [coreA:eth3, coreB:eth3]
     - endpoints: [access:eth2, coreA:eth1]
     - endpoints: [access:eth3, coreB:eth1]
+    - endpoints: [pe1:eth1, access:eth1]
+    - endpoints: [pe2:eth1, access:eth4]
+    - endpoints: [pe1:eth2, pe2:eth2]
+    - endpoints: [pe1:eth3, services:eth1]
+    - endpoints: [pe2:eth3, services:eth2]
+    - endpoints: [services:eth3, swS1:eth1]
+    - endpoints: [services:eth4, swS2:eth1]
+    - endpoints: [swS1:eth2, swS2:eth2]
+    - endpoints: [swS1:eth3, swS2:eth3]
+    - endpoints: [swS1:eth4, swL1:eth1]
+    - endpoints: [swS1:eth5, swL2:eth1]
+    - endpoints: [swS2:eth4, swL1:eth2]
+    - endpoints: [swS2:eth5, swL2:eth2]
+    - endpoints: [swL1:eth3, server1:eth1]
+    - endpoints: [swL1:eth4, server2:eth1]
+    - endpoints: [swL2:eth3, db:eth1]
