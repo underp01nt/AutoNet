@@ -1,0 +1,39 @@
+ospf:
+  routers:
+    coreA:
+      interfaces:
+        eth1:
+          ospf_area: 0
+        eth2:
+          ospf_area: 0
+          ospf_passive: true
+        eth3:
+          ospf_area: 0
+        lo:
+          ospf_area: 0
+          ospf_passive: true
+
+    coreB:
+      interfaces:
+        eth1:
+          ospf_area: 0
+        eth2:
+          ospf_area: 0
+          ospf_passive: true
+        eth3:
+          ospf_area: 0
+        lo:
+          ospf_area: 0
+          ospf_passive: true
+
+    access:
+      interfaces:
+        eth1:
+          ospf_area: 0
+        eth2:
+          ospf_area: 0
+        eth3:
+          ospf_area: 0
+        lo:
+          ospf_area: 0
+          ospf_passive: true

@@ -1,0 +1,45 @@
+bgp:
+  globals:
+    address_family: ipv4 unicast
+    ebgp_requires_policy: false
+
+  routers:
+    access:
+      asn: 10001
+      networks:
+        - 10.100.10.0/24
+        - 10.100.20.0/24
+        # access loopback
+        - 10.100.255.1/32
+      neighbors:
+        - pe1
+        - pe2
+    pe1:
+      asn: 10000
+      networks:
+        # PE1 loopback
+        - 10.100.255.4/32
+      neighbors:
+        - access
+        - pe2
+        - services
+    pe2:
+      asn: 10000
+      networks:
+        # PE2 loopback
+        - 10.100.255.5/32
+      neighbors:
+        - access
+        - pe1
+        - services
+
+    services:
+      asn: 10002
+      networks:
+        # Services loopback
+        - 10.100.255.6/32
+        - 10.100.2.0/24
+        - 10.100.3.0/24
+      neighbors:
+        - pe1
+        - pe2
