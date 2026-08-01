@@ -1,7 +1,7 @@
 <div align="center">
-    <h1>AutoNet</h1>
+    <h1>🌐 AutoNet</h1>
     <p>
-        AutoNet validates and generates Containerlab network topologies and Ansible group variables using YAML and CSV files
+        AutoNet validates and generates Containerlab network topologies and Ansible group variables
     </p>
 </div>
 
@@ -79,18 +79,18 @@ topology/
 ```
 
 * ```<input_directory>``` is a required preliminary folder. It should contain three CSV files 
-(nodes.csv, interfaces.csv, links.csv) detailing network metadata.
-For reference of what these CSV files should like, you can find examples in existing [topologies](https://github.com/underp01nt/AutoNet/tree/main/topologies).
+(nodes, interfaces, links) detailing network metadata.
+The remaining YAML files are optional and only provide protocol-specific configuration.
 
-* The remaining YAML files are optional and only provide protocol-specific configuration.
+    * For reference of what these CSV and YAML files should look like, you can find examples in existing [topologies](https://github.com/underp01nt/AutoNet/tree/main/topologies).
 
-* The **<*>** files are artifacts produced by AutoNet to support automated network deployment.
+* The  <*>  files are artifacts produced by AutoNet to support automated network deployment.
 
 ---
 
 # Generated Files
 
-Depending on the topology, AutoNet generates:
+Depending on the topology, AutoNet can generate:
 
 * Containerlab topology (`*.clab.yml`)
 * Ansible `group_vars`
@@ -101,7 +101,7 @@ Depending on the topology, AutoNet generates:
 
 # Building a Topology
 
-1. Run the `utils/builder.py` script to generate required configuration artifacts 
+1. Run the `utils/builder.py` script to generate configuration artifacts 
 ```bash
 python -m utils.builder <inputs_directory> \
     --name <topology_name> \
@@ -119,7 +119,7 @@ python -m utils.builder <inputs_directory> \
 | `--validate`         | Perform topology validation before generating output |
 
 
-2. Create an automation script to utilize data from the produced file in the ```group_vars``` folder. 
+2. Setup an automation script to use data from the produced file in the ```group_vars``` folder. 
     * If you are using Ansible, you may use the [playbook template](https://github.com/underp01nt/AutoNet/blob/main/templates/configuration.yml)
 
 ---
@@ -128,18 +128,18 @@ python -m utils.builder <inputs_directory> \
 
 Navigate to the directory containing the generated .clab.yml file and start the lab:
 ```bash
-sudo containerlab deploy -t <topology_name>.clab.yml
+containerlab deploy -t <topology_name>.clab.yml
 ```
 
 If using Ansible, run your playbook to configure the network nodes
 ```bash
-ansible-playbook -i <inventory> <playbook>
+ansible-playbook -i <path/to/inventory> <path/to/playbook>
 ```
 
 To destroy the topology and clean up resources:
 
 ```bash
-sudo containerlab destroy -t <topology_name>.clab.yml
+containerlab destroy -t <topology_name>.clab.yml
 ```
 
 > **Note:** Containerlab and the required container images (for example, FRRouting and Arista cEOS) must already be installed on the host system before deploying a topology.
@@ -165,4 +165,4 @@ Any failures are reported after validation.
 * FRRouting
 * Arista cEOS
 * Nokia SR Linux
-* Linux hosts (e.g. Alpine Linux)
+* Alpine Linux
