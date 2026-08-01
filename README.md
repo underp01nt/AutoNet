@@ -1,12 +1,12 @@
 <div align="center">
     <h1>AutoNet</h1>
-
-    AutoNet validates and generates Containerlab network topologies and Ansible group variables using YAML and CSV input files
+    <p>
+        AutoNet validates and generates Containerlab network topologies and Ansible group variables using YAML and CSV input files
+    </p>
 </div>
 
 <div align="center">
 
-    
 
 </div>
 
@@ -18,14 +18,11 @@
 </div>
 
 
-
 ## Features
-
-* Generate Containerlab (`.clab.yml`) topology files
-* Generate Ansible `group_vars` inventories
+* Validate network topology prior to config generation
+* Generate Containerlab (`.clab.yml`) topology files + Ansible `group_vars` inventories
 * Produce FRRouting daemon configuration files
-* Produce Layer-2 switch startup configurations
-* Validate network topology prior to generation
+* Create Layer-2 switch startup configurations
 * Support optional routing protocol configurations (like OSPF or BGP) via YAML
 
 ---
@@ -87,13 +84,24 @@ For reference of what these CSV files should like, you can find examples in exis
 
 * The remaining YAML files are optional and only provide protocol-specific configuration.
 
-* The **<*>** files are artifacts produced by AutoNet, which are used to support automated network deployment.
+* The **<*>** files are artifacts produced by AutoNet to support automated network deployment.
+
+---
+
+# Generated Files
+
+Depending on the topology, AutoNet generates:
+
+* Containerlab topology (`*.clab.yml`)
+* Ansible `group_vars`
+* FRRouting daemon configuration files
+* Switch startup configuration files
 
 ---
 
 # Building a Topology
 
-1. Run the Python script to generate required configuration artifacts 
+1. Run the `utils/builder.py` script to generate required configuration artifacts 
 ```bash
 python -m utils.builder <inputs_directory> \
     --name <topology_name> \
@@ -158,13 +166,3 @@ Any failures are reported after validation.
 * Arista cEOS
 * Nokia SR Linux
 * Linux hosts (e.g. Alpine Linux)
-
-
-# Generated Files
-
-Depending on the topology, AutoNet generates:
-
-* Containerlab topology (`*.clab.yml`)
-* Ansible `group_vars`
-* FRRouting daemon configuration files
-* Switch startup configuration files
