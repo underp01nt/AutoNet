@@ -1,7 +1,7 @@
 <div align="center">
     <h1>AutoNet</h1>
     <p>
-        AutoNet validates and generates Containerlab network topologies and Ansible group variables using YAML and CSV input files
+        AutoNet validates and generates Containerlab network topologies and Ansible group variables using YAML and CSV files
     </p>
 </div>
 
