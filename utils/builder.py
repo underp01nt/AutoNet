@@ -70,9 +70,12 @@ class NetworkTopology:
     r"""
     Stores node-related data for generating configs and .clab.yml artifacts
     """
-    def __init__(self, name: str, group: str, inputs_dir: str, switch_kind="arista_ceos", **filepaths):
+    def __init__(self, name: str, group: str, inputs_dir: str, validate:bool, 
+                 switch_kind="arista_ceos", write_files=True, **filepaths):
+        
         self.name = name if name else "my-network"        # assigns containerlab name
         self.devices: dict = {}                           # stores group_vars file data
+        self.write_files = write_files                    # write files
 
         # defines nodes and links data for .clab.yml
         self.nodes: dict = {}
@@ -116,14 +119,15 @@ class NetworkTopology:
         if self.policy_file_path and os.path.exists(self.policy_file_path): self.parse_bgp_file()
 
         # validate the newly created topology to detect any network inconsistencies
-        # self.validate_topology()
+        if validate: self.validate_topology()
 
         if self.switch_interfaces:
             for switch in self.switch_interfaces:
-                match self.switch_kind:
-                    case "arista_ceos": self.create_ceos_switch_cli_file(switch)
-                    case "nokia_srlinux": self.create_srlinux_switch_cli_file(switch)
-                    case _: raise ValueError("Unrecognized switch image")
+                if self.write_files:
+                    match self.switch_kind:
+                        case "arista_ceos": self.create_ceos_switch_cli_file(switch)
+                        case "nokia_srlinux": self.create_srlinux_switch_cli_file(switch)
+                        case _: raise ValueError("Unrecognized switch image")
 
     def _get_switch_image(self) -> str:
         r"""
@@ -143,9 +147,135 @@ class NetworkTopology:
             data = {"name": self.name, "topology": {"nodes": self.nodes, "links": self.links}}
             yaml.dump(data, file)
 
-    # TODO: subnets should be registered, check subnets, subnet prefix lengths, and node interfaces
     def validate_topology(self):
-        raise NotImplementedError()
+        r"""
+        Performs sanity checking of topology configuration
+
+        Raises **ValueError** on the first validation failure
+        """
+
+        used_endpoints = set()
+        used_ips = {}
+        loopbacks = set()
+
+        errors = []
+
+        # validate devices/interfaces
+        for device_name, device in self.devices.items():
+            interfaces = device.get("interfaces", {})
+
+            # check for no interface devices of non-switch devices
+            if not "switch" in device["roles"] and not interfaces:
+                errors.append(f"{device_name}: no interfaces defined")
+
+            for intf_name, intf in interfaces.items():
+                if "ip_address" not in intf:
+                    errors.append(f"{device_name}:{intf_name} missing IP address")
+
+                # validate IP address assignment
+                iface = None
+
+                try: iface = ip_interface(intf["ip_address"])
+                except ValueError:
+                    errors.append(f"{device_name}:{intf_name} has invalid IP {intf['ip_address']}")
+                if iface is None: continue
+
+                # check for duplicate IPs
+                ip = iface.ip
+                if ip in used_ips:
+                    other = used_ips[ip]
+                    errors.append(f"Duplicate IP address {ip} used by {other} and {device_name}:{intf_name}")
+
+                # account for this device data to check for duplicates
+                used_ips[ip] = f"{device_name}:{intf_name}"
+
+                # loopback validation
+                if intf_name.lower() == "lo":
+                    if iface.network.prefixlen != 32:
+                        errors.append(f"{device_name}: loopback must be /32")
+
+                    if ip in loopbacks:
+                        errors.append(f"Duplicate loopback address {ip}")
+
+                    loopbacks.add(ip)
+
+        # validate links
+        for link in self.links:
+            if len(link["endpoints"]) != 2:
+                errors.append(f"{link} is not a valid link")
+
+            endpoint_data = []
+            for endpoint in link["endpoints"]:
+                if endpoint in used_endpoints:
+                    errors.append(f"Duplicate endpoint detected: {endpoint}")
+
+                used_endpoints.add(endpoint)
+
+                device, interface = None, None
+                try: device, interface = endpoint.split(":")
+                except ValueError:
+                    errors.append(f"Malformed endpoint '{endpoint}'")
+                if not device and not interface: continue
+
+                if device not in self.devices:
+                    errors.append(f"Unknown device '{device}'")
+
+                # Switches don't define interfaces in self.devices.
+                # Just record them and skip IP/subnet validation.
+                if "switch" in self.devices[device]["roles"]:
+                    endpoint_data.append((device, interface, None))
+                    continue
+
+                if interface not in self.devices[device]["interfaces"]:
+                    errors.append(f"{device} has no interface '{interface}'")
+
+                endpoint_data.append((
+                        device, 
+                        interface, 
+                        ip_interface(self.devices[device]["interfaces"][interface]["ip_address"]),
+                    )
+                )
+
+            dev1, int1, ip1 = endpoint_data[0]
+            dev2, int2, ip2 = endpoint_data[1]
+
+            # self-links
+            if dev1 == dev2: errors.append(f"Self-link detected on {dev1} / {dev2}")
+
+            # only perform L3 validation if both endpoints have IPs
+            if ip1 is not None and ip2 is not None:
+                # check if IPs in this link are in same subnet
+                if ip1.network != ip2.network:
+                    errors.append(f"{dev1}:{int1} ({ip1}) and {dev2}:{int2} ({ip2}) are not in the same subnet")
+
+                # check if IPs of this link are different 
+                if ip1.ip == ip2.ip:
+                    errors.append(f"{dev1}:{int1} and {dev2}:{int2} share IP address {ip1.ip}")
+
+        # role validation
+        for device_name, device in self.devices.items():
+            roles = set(device.get("roles", []))
+
+            if "host" in roles:
+                if "protocols" in device:
+                    errors.append(f"{device_name}: host cannot run routing protocols")
+
+            if "router" in roles:
+                # check BGP configs
+                if "bgp" in device.get("protocols", []):
+                    bgp = device.get("bgp")
+
+                    if not bgp:
+                        errors.append(f"{device_name}: protocol bgp enabled but bgp configuration missing")
+
+                    if "asn" not in bgp:
+                        errors.append(f"{device_name}: missing BGP ASN")
+
+                    if "neighbors" not in bgp:
+                        errors.append(f"{device_name}: no BGP neighbors defined")
+
+        if errors:
+            raise ValueError("\n".join(errors))
 
     def to_group_vars_file(self):
         with open(self.output_group_vars_file, "w") as file:
@@ -160,15 +290,16 @@ class NetworkTopology:
         switch_dir = self.main_dir / "configs" / name
         switch_dir.mkdir(parents=True, exist_ok=True)
 
-        with open(switch_dir / f"{name}.cli", "w") as ceos_switch_config:
-            ceos_switch_config.write(f"hostname {name}\n")
-            ceos_switch_config.write(f"conf t\n\n")
+        if self.write_files:
+            with open(switch_dir / f"{name}.cli", "w") as ceos_switch_config:
+                ceos_switch_config.write(f"hostname {name}\n")
+                ceos_switch_config.write(f"conf t\n\n")
 
-            for interface in self.switch_interfaces[name]:
-                ceos_switch_config.write(f"interface {interface}\n")
-                ceos_switch_config.write("  no shut\n")
-                ceos_switch_config.write("  switchport\n")
-                ceos_switch_config.write("!\n")
+                for interface in self.switch_interfaces[name]:
+                    ceos_switch_config.write(f"interface {interface}\n")
+                    ceos_switch_config.write("  no shut\n")
+                    ceos_switch_config.write("  switchport\n")
+                    ceos_switch_config.write("!\n")
 
         return f"configs/{name}/{name}.cli"
 
@@ -186,16 +317,17 @@ class NetworkTopology:
             srlinux_switch_config.write(f"edit system name host-name {name}")
             srlinux_switch_config.write("set network-instance mac-vrf-1 type mac-vrf \n")
             srlinux_switch_config.write("set network-instance mac-vrf-1 admin-state enable \n\n")
-            
-            for interface in self.switch_interfaces[name]:
-                # create interface
-                srlinux_switch_config.write(f"set interface {interface} admin-state enable \n")
-                # define interface type
-                srlinux_switch_config.write(f"set interface {interface} subinterface 0 type bridged \n\n")
-                # assign interface to switch instance
-                srlinux_switch_config.write(f"set network-instance mac-vrf-1 interface {interface}.0 \n")
 
-            srlinux_switch_config.write("commit now")
+            if self.write_files:
+                for interface in self.switch_interfaces[name]:
+                    # create interface
+                    srlinux_switch_config.write(f"set interface {interface} admin-state enable \n")
+                    # define interface type
+                    srlinux_switch_config.write(f"set interface {interface} subinterface 0 type bridged \n\n")
+                    # assign interface to switch instance
+                    srlinux_switch_config.write(f"set network-instance mac-vrf-1 interface {interface}.0 \n")
+
+                srlinux_switch_config.write("commit now")
 
         return f"configs/{name}/{name}.cli"
     
@@ -371,9 +503,10 @@ class NetworkTopology:
         device_dir = self.main_dir / "configs" / device_name
         device_dir.mkdir(parents=True, exist_ok=True) 
 
-        with open(device_dir / f"daemons", "w") as f:
-            for daemon, enabled in daemons.items():
-                f.write(f"{daemon}={enabled}\n")
+        if self.write_files:
+            with open(device_dir / f"daemons", "w") as f:
+                for daemon, enabled in daemons.items():
+                    f.write(f"{daemon}={enabled}\n")
 
     def parse_nodes_csv(self):
         with open(self.nodes_file_path, mode="r", newline="") as nodes_file:
@@ -435,6 +568,7 @@ if __name__ == "__main__":
     parser.add_argument("--name")               # topology name
     parser.add_argument("--group")              # group name for Ansible
     parser.add_argument("--switch", type=str)   # switch option
+    parser.add_argument("--validate", action="store_true")
     args = parser.parse_args()
 
     nodes_file_path = os.path.join(args.inputs, "nodes.csv")
@@ -455,6 +589,7 @@ if __name__ == "__main__":
     
     if not (no_nodes or no_links or no_interfaces):
         topology = NetworkTopology(args.name, args.group, args.inputs, 
+                                   validate=args.validate,
                                    switch_kind=args.switch,
                                    nodes_file_path=nodes_file_path,
                                    links_file_path=links_file_path,
