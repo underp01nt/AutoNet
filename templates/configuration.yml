@@ -1,0 +1,99 @@
+---
+- name: Configure node interfaces
+  hosts: machines
+  gather_facts: no
+
+  tasks:
+    - name: Interface assignment/Default gateway setup (host)/OSPF areas
+      ansible.builtin.shell: |
+        {% if interfaces %}
+          docker exec clab-enterprise-{{ device }} sh -ec "
+            {% for name, config in interfaces.items() %}
+              ip link set {{ name }} up 
+              ip addr replace {{ config.ip_address }} dev {{ name }}
+            {% endfor %}
+
+            {% if 'router' in node_roles %}
+              vtysh <<EOF
+              configure terminal
+
+              ! ======== CONFIGURE OSPF ========
+              {% for name, config in interfaces.items() %}
+                  {% if config.ospf_area is defined %}
+                    interface {{ name }}
+                    ip ospf area {{ config.ospf_area }}
+
+                    {% if config.ospf_passive %}
+                      ip ospf passive
+                    {% endif %}
+                  {% endif %}
+              {% endfor %}
+
+              {% if 'ospf' in item.value.protocols %}
+                router ospf
+
+                {% for protocol in item.value.ospf.redistribute | default([]) %}
+                  redistribute {{ protocol }}
+                {% endfor %}
+
+                exit
+              {% endif %}
+
+              ! ======== CONFIGURE BGP ========
+              {% if item.value.bgp is defined %}
+                router bgp {{ item.value.bgp.asn }}
+
+                ! disable policy-based BGP (will need to work on this sometime...)
+                {% if not bgp_globals.ebgp_requires_policy %}
+                  no bgp ebgp-requires-policy
+                {% endif %}
+
+                ! configure neigbors
+                {% for neighbor in item.value.bgp.neighbors | default([]) %}
+                  neighbor {{ neighbor.ip_address }} remote-as {{ neighbor.remote_as }}
+                {% endfor %}
+
+                {% if bgp_globals.address_family %}
+                  address-family {{ bgp_globals.address_family }}
+                {% endif %}
+
+                ! allow route exchanging between neighbors
+                {% for neighbor in item.value.bgp.neighbors %}
+                  neighbor {{ neighbor.ip_address }} activate
+
+                  ! ibgp assumes all nodes in same AS can reach a next-hop, need to configure neighbor as hop
+                  {% if neighbor.remote_as == item.value.bgp.asn %}
+                    neighbor {{ neighbor.ip_address }} next-hop-self
+                  {% endif %}
+                {% endfor %}
+
+                {% for network in item.value.bgp.networks | default([]) %}
+                  network {{ network }}
+                {% endfor %}
+
+                {% for protocol in item.value.bgp.redistribute | default([]) %}
+                  redistribute {{ protocol }}
+                {% endfor %}
+
+              {% endif %}
+
+              end
+
+              {% elif 'switch' not in node_roles %}  
+                ip route replace default via {{ item.value.next_hop }}
+              {% endif %}
+          "
+
+        {% endif %}
+
+      loop: "{{ devices | dict2items }}"   # key, value.{___}
+      vars:
+        device: "{{ item.key }}"
+        interfaces: "{{ item.value.interfaces | default({}) }}"
+        node_roles: "{{ item.value.roles }}"
+        bgp_globals: "{{ globals | default({}) }}"
+      when: interfaces | length > 0    # skip switches
+      register: config_results
+    
+    # - debug:
+    #     var: config_results
